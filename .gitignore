@@ -1,0 +1,5 @@
+**/*~
+**/*.swp
+.vscode
+go.sum
+timesync*
