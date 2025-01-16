@@ -1,23 +1,23 @@
-all: timesync-openbsd-amd64 timesync-netbsd-amd64 timesync-freebsd-amd64 timesync-linux-amd64 \
-	timesync-linux-ppc64le timesync
+all: timesync timesync-openbsd-amd64 timesync-netbsd-amd64 timesync-freebsd-amd64 timesync-linux-amd64 \
+	timesync-linux-ppc64le 
 
-timesync: main.go
-	go build -ldflags="-s -w" -o $@ $<
+timesync: main.go settime-darwin.go 
+	go build -ldflags="-s -w" -o $@ $*
 
-timesync-openbsd-amd64: main.go
-	GOOS=openbsd GOARCH=amd64 go build -ldflags="-s -w" -o $@ $<
+timesync-openbsd-amd64: main.go settime-openbsd.go
+	GOOS=openbsd GOARCH=amd64 go build -ldflags="-s -w" -o $@ $*
 
-timesync-netbsd-amd64: main.go
-	GOOS=netbsd GOARCH=amd64 go build -ldflags="-s -w" -o $@ $<
+timesync-netbsd-amd64: main.go settime-netbsd.go 
+	GOOS=netbsd GOARCH=amd64 go build -ldflags="-s -w" -o $@ $*
 
-timesync-freebsd-amd64: main.go
-	GOOS=freebsd GOARCH=amd64 go build -ldflags="-s -w" -o $@ $<
+timesync-freebsd-amd64: main.go settime-freebsd.go
+	GOOS=freebsd GOARCH=amd64 go build -ldflags="-s -w" -o $@ $*
 
-timesync-linux-amd64: main.go
-	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $@ $<
+timesync-linux-amd64: main.go settime-linux.go
+	GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o $@ $*
 
-timesync-linux-ppc64le: main.go
-	GOOS=linux GOARCH=ppc64le go build -ldflags="-s -w" -o $@ $<
+timesync-linux-ppc64le: main.go settime-linux.go
+	GOOS=linux GOARCH=ppc64le go build -ldflags="-s -w" -o $@ $*
 
 clean:
 	rm -f timesync timesync-openbsd-amd64 timesync-netbsd-amd64 \

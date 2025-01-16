@@ -7,8 +7,6 @@ import (
 	"log/syslog"
 	"net"
 	"os"
-	"os/exec"
-	"runtime"
 	"time"
 
 	"github.com/beevik/ntp"
@@ -57,6 +55,7 @@ func main() {
 		os.Exit(-1)
 		return
 	}
+	ntime = ntime.Add(time.Millisecond * 5)
 	ntimepoch := ntime.UnixMilli()
 	nowpoch := time.Now().UnixMilli()
 	delta := nowpoch - ntimepoch
@@ -95,51 +94,12 @@ func main() {
 			}
 		}
 	}
-	log.Printf("Current time: %vms epoch", nowpoch)
-	log.Printf("Network time(%v): %vms epoch", server, ntime.UnixMilli())
-	log.Printf("Time difference: %vms", ntimepoch-nowpoch)
+	log.Printf("Current time: %v ms epoch", nowpoch)
+	log.Printf("Network time(%v): %v ms epoch", server, ntime.UnixMilli())
+	log.Printf("Time difference: %v ms", ntimepoch-nowpoch)
 	if syslog != nil {
 		syslog.Info(fmt.Sprintf("Time difference: %vms", ntimepoch-nowpoch))
 	}
-	log.Printf("Call time: %vms < 500ms", nowpoch-prepoch)
+	log.Printf("Call time: %vms < 500 ms", nowpoch-prepoch)
 	os.Exit(0)
 }
-
-func setSystemDate(t time.Time) error {
-	date := "/bin/date"
-	var args []string
-	var err error = nil
-
-	switch runtime.GOOS {
-	case "linux":
-		s := fmt.Sprintf("@%d", t.Unix())
-		args = []string{"-s", s}
-	case "netbsd":
-		s := fmt.Sprintf("%d%02d%02d%02d%02d.%02d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
-		args = []string{"-u", s}
-	case "openbsd":
-		s := fmt.Sprintf("%d%02d%02d%02d%02d.%02d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
-		args = []string{"-u", s}
-	case "freebsd":
-		s := fmt.Sprintf("%d%02d%02d%02d%02d.%02d", t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second())
-		args = []string{"-u", s}
-	default:
-		err = fmt.Errorf("Unsupported OS: %v", runtime.GOOS)
-		return err
-	}
-	err = exec.Command(date, args...).Run()
-	return err
-}
-
-// date +"%s"
-// openbsd set: date [-aju] [-f pformat] [-r seconds] [-z output_zone] [+format] [[[[[[cc]yy]mm]dd]HH]MM[.SS]]
-//
-// freebsd: date  [-nRu]  [-z  output_zone]	[-I[FMT]]  [-r	filename] [-r seconds]
-//                [-v[+|-]val[y|m|w|d|H|M|S]]	[+output_fmt]
-//   		date  [-jnRu]  [-z  output_zone]	[-I[FMT]]  [-v[+|-]val[y|m|w|d|H|M|S]]
-//			      [[[[[cc]yy]mm]dd]HH]MM[.SS]	[+output_fmt]
-// 			date  [-jnRu] [-z output_zone] [-I[FMT]]	[-v[+|-]val[y|m|w|d|H|M|S]] -f
-//				  input_fmt new_date [+output_fmt]
-// netbsd: date [-ajnRUu] [-d date] [-r seconds] [-z zone] [+format]
-//	            [[[[[[CC]yy]mm]dd]HH]MM[.SS]]
-//  	   date [-ajnRu] -f input_format new_date [+format]
