@@ -55,9 +55,8 @@ func main() {
 		os.Exit(-1)
 		return
 	}
-	ntime = ntime.Add(time.Millisecond * 5)
-	ntimepoch := ntime.UnixMilli()
 	nowpoch := time.Now().UnixMilli()
+	ntimepoch := ntime.UnixMilli()
 	delta := nowpoch - ntimepoch
 	if delta < 0 {
 		delta = -delta
@@ -69,11 +68,13 @@ func main() {
 		}
 		return
 	}
+	ntime = ntime.Add(time.Millisecond * (time.Duration)((nowpoch-prepoch)/4))
+	ntimepoch = ntime.UnixMilli()
 	if delta > yearLaps {
 		log.Printf("Time is off by more than a year: %d, not adjusting", delta)
 	} else {
 		if delta > 1000 {
-			err = setSystemDate(ntime, (nowpoch-prepoch)/5)
+			err = setSystemDate(ntime, 0)
 			if err != nil {
 				log.Printf("Failed to set system date: %v", err)
 				if syslog != nil {
