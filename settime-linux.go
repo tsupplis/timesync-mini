@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-func setSystemDate(t time.Time) error {
+func setSystemDate(t time.Time, adj int64) error {
 	// s := fmt.Sprintf("@%d", t.Unix())
 	// args = []string{"-s", s}
 	// err = exec.Command(date, args...).Run()
 	var tv syscall.Timeval
 	tv.Sec = t.Unix()
-	tv.Usec = (t.UnixMilli() % 1000) * 1000
+	tv.Usec = (t.UnixMilli()%1000 + adj) * 1000
 	return syscall.Settimeofday(&tv)
 }

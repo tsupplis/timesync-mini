@@ -73,7 +73,7 @@ func main() {
 		log.Printf("Time is off by more than a year: %d, not adjusting", delta)
 	} else {
 		if delta > 1000 {
-			err = setSystemDate(ntime)
+			err = setSystemDate(ntime, (nowpoch-prepoch)/5)
 			if err != nil {
 				log.Printf("Failed to set system date: %v", err)
 				if syslog != nil {
