@@ -1,3 +1,5 @@
+.PHONY: clean push push-openbsd-amd64 push-netbsd-amd64 push-freebsd-amd64 push-linux-amd64 local
+
 local: timesync
 
 all: local timesync-openbsd-amd64 timesync-netbsd-amd64 timesync-freebsd-amd64 \
