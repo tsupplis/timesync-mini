@@ -1,8 +1,8 @@
 local: timesync
 
-all: local timesync-openbsd-amd64 timesync-netbsd-amd64 timesync-freebsd-amd64 timesync-linux-amd64 \
-	timesync-linux-ppc64le 
-
+all: local timesync-openbsd-amd64 timesync-netbsd-amd64 timesync-freebsd-amd64 \
+	timesync-linux-amd64 
+	
 timesync: main.go settime-darwin.go 
 	go build -ldflags="-s -w" -o $@ $*
 
@@ -25,7 +25,7 @@ clean:
 	rm -f timesync timesync-openbsd-amd64 timesync-netbsd-amd64 \
 	timesync-freebsd-amd64 timesync-linux-amd64 timesync-linux-ppc64le
 
-push: push-openbsd-amd64 push-netbsd-amd64 push-freebsd-amd64 push-linux-amd64 \
+push: push-openbsd-amd64 push-netbsd-amd64 push-freebsd-amd64 push-linux-amd64 
 
 push-openbsd-amd64: timesync-openbsd-amd64
 	scp $< @garlic-openbsd-01:
@@ -44,9 +44,3 @@ push-linux-amd64: timesync-linux-amd64
 	ssh garlic-debian-01 "strip $<;sudo cp timesync-linux-amd64 /usr/local/bin/timesync;rm -f timesync-linux-amd64"
 	scp $< @garlic-alpine-01:
 	ssh garlic-alpine-01 "strip $<;sudo cp timesync-linux-amd64 /usr/local/bin/timesync;rm -f timesync-linux-amd64"
-	scp $< @garlic-centos-01:
-	ssh garlic-centos-01 "strip $<;sudo cp timesync-linux-amd64 /usr/local/bin/timesync;rm -f timesync-linux-amd64"
-
-push-linux-ppc64le: timesync-linux-ppc64le
-	scp $< @garlic-ppc64:
-	ssh garlic-ppc64 "strip $<;sudo cp timesync-linux-ppc64le /usr/local/bin/timesync;rm -f timesync-linux-ppc64le"
