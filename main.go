@@ -54,7 +54,7 @@ func parseConfig() (*Config, error) {
 }
 
 func main() {
-	syslog, err := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "timesync")
+	syslog, _ := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "timesync")
 	log.SetPrefix("timesync: ")
 	cfg, err := parseConfig()
 
@@ -112,7 +112,7 @@ func timeSync(server string, test bool, syslog *syslog.Writer, verbose bool) err
 		if syslog != nil {
 			syslog.Err(fmt.Sprintf("Year is less than 2025: %v", nyear))
 		}
-		return errors.New("Year is less than 2025")
+		return errors.New("year is less than 2025")
 	}
 	nowpoch := time.Now().UnixMilli()
 	ntimepoch := ntime.UnixMilli()
@@ -145,7 +145,7 @@ func timeSync(server string, test bool, syslog *syslog.Writer, verbose bool) err
 			} else {
 				log.Printf("System time set to network time")
 				if syslog != nil {
-					syslog.Info(fmt.Sprintf("System time set to network time"))
+					syslog.Info("System time set to network time")
 				}
 			}
 		} else {
@@ -153,14 +153,15 @@ func timeSync(server string, test bool, syslog *syslog.Writer, verbose bool) err
 				log.Print("Time is already in sync")
 			}
 			if syslog != nil {
-				syslog.Info(fmt.Sprintf("Time is already in sync"))
+				syslog.Info("Time is already in sync")
 			}
 		}
 	}
 	if verbose {
-		log.Printf("Current time: %v ms epoch", nowpoch)
+		log.Printf("Before time: %v ms epoch", nowpoch)
 		log.Printf("Network time(%v): %v ms epoch", server, ntime.UnixMilli())
 		log.Printf("Time difference: %v ms", ntimepoch-nowpoch)
+		log.Printf("Current time: %v", time.Now().Format(time.RFC3339))
 	}
 	if syslog != nil {
 		syslog.Info(fmt.Sprintf("Time difference: %vms", ntimepoch-nowpoch))
