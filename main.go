@@ -5,7 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"log/syslog"
 	"net"
 	"os"
@@ -55,7 +55,6 @@ func parseConfig() (*Config, error) {
 
 func main() {
 	syslog, _ := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "timesync")
-	log.SetPrefix("timesync: ")
 	cfg, err := parseConfig()
 
 	if err != nil {
@@ -64,18 +63,20 @@ func main() {
 	if cfg == nil {
 		os.Exit(0)
 	}
+
 	if cfg.Verbose {
-		log.Printf("Server config: %v", cfg.Servers)
-	}
-	if err != nil && syslog != nil {
-		log.Printf("Failed to create syslog, ignored: %v", err)
+		slog.SetLogLoggerLevel(slog.LevelDebug)
 	} else {
-		if cfg.Verbose {
-			log.Printf("Syslog created")
-		}
+		slog.SetLogLoggerLevel(slog.LevelInfo)
+	}
+	slog.Debug("Server config", "config", cfg.Servers)
+	if err != nil && syslog != nil {
+		slog.Error("Failed to create syslog, ignored", "error", err)
+	} else {
+		slog.Debug("Syslog created")
 	}
 	for _, server := range cfg.Servers {
-		err = timeSync(server, cfg.Test, syslog, cfg.Verbose)
+		err = timeSync(server, cfg.Test, syslog)
 		if err == nil {
 			os.Exit(0)
 		}
@@ -83,24 +84,22 @@ func main() {
 	os.Exit(-1)
 }
 
-func timeSync(server string, test bool, syslog *syslog.Writer, verbose bool) error {
+func timeSync(server string, test bool, syslog *syslog.Writer) error {
 	var yearLaps int64 = 365 * 24 * 60 * 60 * 1000
 	ips, err := net.LookupIP(server)
 	if err != nil {
-		log.Printf("Could not get IPs: %v\n", err)
+		slog.Error("Could not get IPs:", "error", err)
 		if syslog != nil {
 			syslog.Err(fmt.Sprintf("Could not get IPs: %v\n", err))
 		}
 		return err
 	}
 	server = ips[0].String()
-	if verbose {
-		log.Printf("Network time server: %v", server)
-	}
+	slog.Debug("Network time server", "server", server)
 	prepoch := time.Now().UnixMilli()
 	ntime, err := ntp.Time(server)
 	if err != nil {
-		log.Printf("Failed to get time: %v", err)
+		slog.Error("Failed to get time", "error", err)
 		if syslog != nil {
 			syslog.Err(fmt.Sprintf("Failed to get time: %v", err))
 		}
@@ -108,7 +107,7 @@ func timeSync(server string, test bool, syslog *syslog.Writer, verbose bool) err
 	}
 	nyear := ntime.Year()
 	if nyear < 2025 {
-		log.Printf("Year is less than 2025: %v", nyear)
+		slog.Error("Year is less than 2025", "year", nyear)
 		if syslog != nil {
 			syslog.Err(fmt.Sprintf("Year is less than 2025: %v", nyear))
 		}
@@ -121,7 +120,7 @@ func timeSync(server string, test bool, syslog *syslog.Writer, verbose bool) err
 		delta = -delta
 	}
 	if nowpoch-prepoch > 500 {
-		log.Printf("Time sync took too long (%v)", nowpoch-prepoch)
+		slog.Error("Time sync took too long", "duration", nowpoch-prepoch)
 		if syslog != nil {
 			syslog.Err(fmt.Sprintf("Time sync took too long (%v)", nowpoch-prepoch))
 		}
@@ -130,44 +129,37 @@ func timeSync(server string, test bool, syslog *syslog.Writer, verbose bool) err
 	ntime = ntime.Add(time.Millisecond * (time.Duration)((nowpoch-prepoch)/4))
 	ntimepoch = ntime.UnixMilli()
 	if delta > yearLaps {
-		if verbose {
-			log.Printf("Time is off by more than a year: %d, not adjusting", delta)
-		}
+		slog.Info("Time is off by more than a year, not adjusting", "delta", delta)
 	} else {
 		if delta > 500 {
 			err = setSystemDate(ntime, 0, test)
 			if err != nil {
-				log.Printf("Failed to set system date: %v", err)
+				slog.Error("Failed to set system date", "error", err)
 				if syslog != nil {
 					syslog.Err(fmt.Sprintf("Failed to set system date: %v", err))
 				}
 				return err
 			} else {
-				log.Printf("System time set to network time")
+				slog.Info("System time set to network time", "server", server, "delta", delta)
 				if syslog != nil {
 					syslog.Info("System time set to network time")
 				}
 			}
 		} else {
-			if verbose {
-				log.Print("Time is already in sync")
-			}
+			slog.Info("Time is already in sync")
 			if syslog != nil {
 				syslog.Info("Time is already in sync")
 			}
 		}
 	}
-	if verbose {
-		log.Printf("Before time: %v ms epoch", nowpoch)
-		log.Printf("Network time(%v): %v ms epoch", server, ntime.UnixMilli())
-		log.Printf("Time difference: %v ms", ntimepoch-nowpoch)
-		log.Printf("Current time: %v", time.Now().Format(time.RFC3339))
-	}
+	slog.Debug("Before time: ", "epoch", nowpoch)
+	slog.Debug("Network time", "server", server, "epoch", ntime.UnixMilli())
+	slog.Debug("Time difference", "difference", ntimepoch-nowpoch)
+	slog.Debug("Current time", "time", time.Now().Format(time.RFC3339))
 	if syslog != nil {
 		syslog.Info(fmt.Sprintf("Time difference: %vms", ntimepoch-nowpoch))
 	}
-	if verbose {
-		log.Printf("Call time: %vms < 500 ms", nowpoch-prepoch)
-	}
+	slog.Debug("Call time < 500 ms", "time", nowpoch-prepoch)
+
 	return nil
 }
