@@ -15,13 +15,16 @@ import (
 )
 
 // Config holds the settings for the application.
+// Fields:
+// - Servers: A list of NTP servers to synchronize with.
+// - Verbose: If true, enables verbose output.
+// - Test: If true, runs the application in test mode without setting the system time.
 type Config struct {
 	Servers []string
 	Verbose bool
 	Test    bool
 }
 
-// parseConfig parses command line flags and returns a Config structure.
 func parseConfig() (*Config, error) {
 	cfg := &Config{}
 	showHelp := false
@@ -84,6 +87,21 @@ func main() {
 	os.Exit(-1)
 }
 
+// timeSync synchronizes the system time with the given NTP server.
+// It performs the following steps:
+// 1. Resolves the IP address of the NTP server.
+// 2. Retrieves the current time from the NTP server.
+// 3. Checks if the retrieved time is valid (year >= 2025).
+// 4. Calculates the time difference between the system time and the NTP time.
+// 5. If the time difference is significant, it adjusts the system time.
+// 6. Logs the results and any errors encountered.
+//
+// Parameters:
+// - server: The NTP server to synchronize with.
+// - test: If true, the function runs in test mode and does not actually set the system time.
+// - syslog: A syslog.Writer to log messages to the system log.
+//
+// Returns an error if any step fails.
 func timeSync(server string, test bool, syslog *syslog.Writer) error {
 	var yearLaps int64 = 365 * 24 * 60 * 60 * 1000
 	ips, err := net.LookupIP(server)
@@ -146,15 +164,15 @@ func timeSync(server string, test bool, syslog *syslog.Writer) error {
 				}
 			}
 		} else {
-			slog.Info("Time is already in sync")
+			slog.Debug("Time is already in sync")
 			if syslog != nil {
 				syslog.Info("Time is already in sync")
 			}
 		}
 	}
-	slog.Debug("Before time: ", "epoch", nowpoch)
-	slog.Debug("Network time", "server", server, "epoch", ntime.UnixMilli())
-	slog.Debug("Time difference", "difference", ntimepoch-nowpoch)
+	slog.Debug("Before time", "sys-epoch", nowpoch)
+	slog.Debug("Network time", "server", server, "network-epoch", ntime.UnixMilli())
+	slog.Debug("Time difference", "epoch-diff", ntimepoch-nowpoch)
 	slog.Debug("Current time", "time", time.Now().Format(time.RFC3339))
 	if syslog != nil {
 		syslog.Info(fmt.Sprintf("Time difference: %vms", ntimepoch-nowpoch))
