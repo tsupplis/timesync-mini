@@ -3,4 +3,6 @@
 **/*.swp
 .vscode
 go.sum
-timesync*
+timesync-*
+timesync
+*.o

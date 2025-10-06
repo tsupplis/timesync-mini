@@ -42,6 +42,8 @@ push: push-openbsd-amd64 push-freebsd-amd64 push-linux-amd64 push-netbsd-amd64
 push-openbsd-amd64: timesync-openbsd-amd64
 	scp $< @curry-openbsd-01:
 	ssh curry-openbsd-01 "strip $<;doas cp $< /usr/local/bin/timesync;rm -f timesync-openbsd-amd64"
+	scp $< @curry-openbsd-02:
+	ssh curry-openbsd-02 "strip $<;doas cp $< /usr/local/bin/timesync;rm -f timesync-openbsd-amd64"
 
 push-netbsd-amd64: timesync-netbsd-amd64
 	scp $< @curry-netbsd-01:
@@ -54,6 +56,10 @@ push-freebsd-amd64: timesync-freebsd-amd64
 push-linux-amd64: timesync-linux-amd64
 	#scp $< @curry-debian-02:
 	#ssh curry-debian-02 "strip $<;sudo cp timesync-linux-amd64 /usr/local/bin/timesync;rm -f timesync-linux-amd64"
+	scp $< @curry-debian-04:
+	ssh curry-debian-04 "strip $<;sudo cp timesync-linux-amd64 /usr/local/bin/timesync;rm -f timesync-linux-amd64"
+	scp $< @curry-alpine-02:
+	ssh curry-alpine-02 "strip $<;sudo cp timesync-linux-amd64 /usr/local/bin/timesync;rm -f timesync-linux-amd64"
 	scp $< @curry-debian-01:
 	ssh curry-debian-01 "strip $<;sudo cp timesync-linux-amd64 /usr/local/bin/timesync;rm -f timesync-linux-amd64"
 	#scp $< @curry-alpine-01:

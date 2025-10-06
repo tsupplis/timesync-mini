@@ -30,7 +30,7 @@ func parseConfig() (*Config, error) {
 	showHelp := false
 
 	fs := flag.NewFlagSet("timesync", flag.ExitOnError)
-	fs.BoolVar(&cfg.Test, "t", false, "Run in test mode")
+	fs.BoolVar(&cfg.Test, "n", false, "Run in test mode (no action)")
 	fs.BoolVar(&cfg.Verbose, "v", false, "Verbose output")
 	fs.BoolVar(&showHelp, "h", false, "Display usage")
 	// Override the default usage message to include the ntp server argument.
