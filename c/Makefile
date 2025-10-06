@@ -1,14 +1,15 @@
 CC=cc
-CFLAGS= -O2 -Os -Wall -Wextra -DUSE_CLOCK_SETTIME
-LDFLAGS=
+CFLAGS= -Os -Wall -Wextra -DUSE_CLOCK_SETTIME
 #for solaris
 #LDFLAGS= -lsocket -lnsl
+STRIP=strip
+RM=rm -f
 
 all: timesync
 
 timesync: timesync.o
 	$(CC) $(LDFLAGS) timesync.o -o timesync $(LDFLAGS)
-	strip timesync
+	$(STRIP) timesync
 
 clean:
-	rm -rf timesync *.o
+	$(RM) timesync *.o
