@@ -56,6 +56,10 @@ static int64_t tv_to_ms(const struct timeval *tv) {
 static int64_t ntp_ts_to_unix_ms(const uint8_t *buf) {
     uint32_t sec = (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
     uint32_t frac = (buf[4] << 24) | (buf[5] << 16) | (buf[6] << 8) | buf[7];
+
+    if (sec < NTP_UNIX_EPOCH_DIFF) {
+        return -1; // Invalid timestamp
+    }
     uint64_t usec =
         ((uint64_t)frac * 1000000ULL) >> 32; /* fraction to microseconds */
     uint64_t unix_sec = (uint64_t)sec - NTP_UNIX_EPOCH_DIFF;
@@ -109,13 +113,19 @@ static int do_ntp_query(const char *server, int timeout_ms,
 
     for (rp = res; rp != NULL; rp = rp->ai_next) {
         sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (sock < 0)
+        if (sock < 0) {
             continue;
+        }
 
         /* set receive timeout */
         tv.tv_sec = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+            stderr_log("WARNING setsockopt SO_RCVTIMEO failed");
+            close(sock);
+            sock = -1;
+            continue;
+        }
 
         /* capture local time before send */
         struct timeval before;
@@ -123,6 +133,7 @@ static int do_ntp_query(const char *server, int timeout_ms,
         ssize_t sent = sendto(sock, packet, NTP_PACKET_SIZE, 0, rp->ai_addr,
                               rp->ai_addrlen);
         if (sent != NTP_PACKET_SIZE) {
+            stderr_log("WARNING Failed to send NTP request");
             close(sock);
             sock = -1;
             continue;
@@ -149,8 +160,32 @@ static int do_ntp_query(const char *server, int timeout_ms,
             continue;
         }
 
+        /* Validate NTP response */
+        /* Check mode field = 4 (server) */
+        if ((buf[0] & 0x07) != 4) {
+            stderr_log("WARNING Invalid mode in NTP response: %d",
+                       buf[0] & 0x07);
+            close(sock);
+            sock = -1;
+            continue;
+        }
+
+        /* Check stratum (0 = invalid) */
+        if (buf[1] == 0) {
+            stderr_log("WARNING Invalid stratum in NTP response: %d", buf[1]);
+            close(sock);
+            sock = -1;
+            continue;
+        }
+
         /* remote transmit timestamp is at bytes 40..47 */
         int64_t remote_ms = ntp_ts_to_unix_ms(&buf[40]);
+        if (remote_ms < 0) {
+            stderr_log("WARNING Invalid transmit timestamp in NTP response");
+            close(sock);
+            sock = -1;
+            continue;
+        }
 
         /* fill outputs */
         *out_local_before_ms = tv_to_ms(&before);
@@ -158,15 +193,23 @@ static int do_ntp_query(const char *server, int timeout_ms,
         *out_remote_ms = remote_ms;
 
         /* compose server address string */
-        if (server_addr_str && server_addr_len > 0) {
+        if (server_addr_str && server_addr_len > 8) {
             if (src.ss_family == AF_INET) {
-                struct sockaddr_in *s4 = (struct sockaddr_in *)&src;
-                inet_ntop(AF_INET, &s4->sin_addr, server_addr_str,
-                          server_addr_len);
+                if (server_addr_len < INET_ADDRSTRLEN) {
+                    snprintf(server_addr_str, server_addr_len, "invalid");
+                } else {
+                    struct sockaddr_in *s4 = (struct sockaddr_in *)&src;
+                    inet_ntop(AF_INET, &s4->sin_addr, server_addr_str,
+                              server_addr_len);
+                }
             } else if (src.ss_family == AF_INET6) {
-                struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&src;
-                inet_ntop(AF_INET6, &s6->sin6_addr, server_addr_str,
-                          server_addr_len);
+                if (server_addr_len < INET6_ADDRSTRLEN) {
+                    snprintf(server_addr_str, server_addr_len, "invalid");
+                } else {
+                    struct sockaddr_in6 *s6 = (struct sockaddr_in6 *)&src;
+                    inet_ntop(AF_INET6, &s6->sin6_addr, server_addr_str,
+                              server_addr_len);
+                }
             } else {
                 snprintf(server_addr_str, server_addr_len, "unknown");
             }
@@ -216,12 +259,20 @@ int main(int argc, char **argv) {
             use_syslog = 1;
         } else if (opt == 't') {
             timeout_ms = atoi(optarg);
-            if (timeout_ms <= 0)
+            if (timeout_ms > 6000) {
+                timeout_ms = 6000;
+            }
+            if (timeout_ms <= 0) {
                 timeout_ms = 2000;
+            }
         } else if (opt == 'r') {
             retries = atoi(optarg);
-            if (retries <= 0)
-                retries = 1;
+            if (retries <= 0) {
+                retries = 3;
+            }
+            if (retries > 10) {
+                retries = 10;
+            }
         } else if (opt == 'v') {
             verbose = 1;
         } else if (opt == 'n') {
@@ -260,7 +311,8 @@ int main(int argc, char **argv) {
     for (attempt = 0; attempt < retries; ++attempt) {
         server_addr[0] = '\0';
         if (verbose) {
-            stderr_log("DEBUG Attempt (%d) at NTP query on %s ...", attempt + 1, server);
+            stderr_log("DEBUG Attempt (%d) at NTP query on %s ...", attempt + 1,
+                       server);
         }
         if (do_ntp_query(server, timeout_ms, &local_before_ms, &remote_ms,
                          &local_after_ms, server_addr,
@@ -318,6 +370,18 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Basic sanity checks for roundtrip time */
+    if (llabs(roundtrip_ms) < 0 || llabs(roundtrip_ms) > 10000) {
+        stderr_log("ERROR Invalid roundtrip time: %lld ms",
+                   (long long)roundtrip_ms);
+        if (use_syslog) {
+            syslog(LOG_ERR, "Invalid suspiciously long roundtrip time: %lld ms",
+                   (long long)roundtrip_ms);
+            closelog();
+        }
+        return 1;
+    }
+
     /* Set system time if conditions are met */
     if (llabs(epoch_diff_ms) > 0 && llabs(epoch_diff_ms) < 500) {
         /* Only adjust if remote year is >= 2025 to avoid issues with
@@ -334,12 +398,12 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
-    if (rtm.tm_year + 1900 < 2025) {
-        stderr_log("WARNING Remote year is less than 2025, not adjusting "
+    /* Check remote year */
+    if (rtm.tm_year + 1900 < 2025 || rtm.tm_year + 1900 > 2200) {
+        stderr_log("ERROR Remote year is less than 2025, not adjusting "
                    "system time.");
         if (use_syslog) {
-            syslog(LOG_WARNING,
-                   "Remote year < 2025, not adjusting system time");
+            syslog(LOG_ERR, "Remote year < 2025, not adjusting system time");
             closelog();
         }
         return 1;
