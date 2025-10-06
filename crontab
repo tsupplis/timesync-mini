@@ -1,2 +1,2 @@
 # timesync crontab every 5 minutes
-*/5 * * * * /usr/local/bin/timesync 192.168.1.1 > /dev/null 2>&
+*/5 * * * * /usr/local/bin/timesync -s 192.168.1.1 > /dev/null 2>&
