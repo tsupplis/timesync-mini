@@ -196,21 +196,14 @@ void usage(const char *prog) {
     fprintf(stderr, "  -h           Show this help message\n");
 }
 
-/*
+/**
  * Main function algorithm (synopsis):
- * 1. Parse command-line arguments for server, timeout, retries, and syslog
- * option.
- * 2. Optionally enable syslog logging.
- * 3. Attempt to query the NTP server up to 'retries' times:
- *    - On success, record local send/receive times and remote server time.
- *    - On failure, retry after a short delay.
- * 4. If all attempts fail, print error and exit.
- * 5. On success:
- *    - Calculate average local time, offset (remote - local), and roundtrip
- * delay.
- *    - Format and print results (server, remote time, timings, offset,
- * roundtrip).
- *    - Optionally log results to syslog.
+ * 1. Initialize network and time synchronization parameters.
+ * 2. Start listening for incoming time sync requests.
+ * 3. Upon receiving a request, process and respond with current time data.
+ * 4. Periodically send time synchronization messages to peers.
+ * 5. Update local time based on received synchronization data.
+ * 6. Handle errors and clean up resources before exiting.
  */
 int main(int argc, char **argv) {
     int opt;
@@ -234,7 +227,7 @@ int main(int argc, char **argv) {
         } else if (opt == 'n') {
             test_only = 1;
         } else if (opt == 'h') {
-            usage(argv[0]);
+            usage("timesync");
             exit(0);
         } else {
             /* ignore unknowns; simple CLI */

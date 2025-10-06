@@ -1,0 +1,9 @@
+#!/bin/bash
+if [ -z "$1" ];then
+    echo "ERR: must specify host"
+    exit 1
+fi
+ssh "$1" mkdir -p work/timesync
+scp Makefile "$1:work/timesync"
+scp timesync_haiku.c "$1:work/timesync/timesync.c"
+ssh "$1" "(cd work/timesync; make clean all; [ -f timesync ] && cp timesync /boot/home/config/settings/boot/launch;ls -al /boot/home/config/settings/boot/launch/timesync)"
