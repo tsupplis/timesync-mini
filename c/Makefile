@@ -1,15 +1,11 @@
-.PHONY: clean 
-
-STRIP=strip
+CC=cc
+CFLAGS= -O2
 
 all: timesync
-	
-timesync: timesync.o
-	$(CC) -o $@ $<
-	$(STRIP) $@
 
-tymesync.o: timesync.c
+timesync: timesync.o
+	$(CC) $(LDFLAGS) timesync.o -o timesync
+	strip timesync
 
 clean:
-	rm -rf timesync timesync.o
-
+	rm -rf timesync *.o

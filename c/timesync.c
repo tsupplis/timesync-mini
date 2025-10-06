@@ -15,7 +15,6 @@
  * - Works on Linux/macOS. Requires linking to standard C library only.
  */
 
-#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -285,7 +284,7 @@ int main(int argc, char **argv) {
         closelog();
     }
 
-    if(getuid() != 0) {
+    if(getuid() != 0 && !test_only) {
         fprintf(stderr,"WRN: Not running as root, cannot set system time.\n");
         if (use_syslog) {
             openlog("ntp_client", LOG_PID|LOG_CONS, LOG_USER);
