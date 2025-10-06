@@ -297,7 +297,7 @@ int main(int argc, char **argv) {
     if(!test_only) {
         /* Set system time if conditions are met */
         if (llabs(epoch_diff_ms) > 0 && llabs(epoch_diff_ms) < 500) {
-            if (rtm.tm_year + 1900 > 2025) {
+            if (rtm.tm_year + 1900 >= 2025) {
             struct timeval delta;
             delta.tv_sec = epoch_diff_ms / 1000;
             delta.tv_usec = (epoch_diff_ms % 1000) * 1000;
