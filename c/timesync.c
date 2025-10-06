@@ -177,7 +177,17 @@ static int do_ntp_query(const char *server, int timeout_ms,
             sock = -1;
             continue;
         }
-
+        
+        
+        /* Check version (1-4 valid) */
+        int protocol_version = (buf[0] >> 3) & 0x07;
+        if (protocol_version < 1 || protocol_version > 4) {
+            stderr_log("WARNING Invalid version in NTP response: %d",
+                       protocol_version);
+            close(sock);
+            continue;
+        }
+ 
         /* remote transmit timestamp is at bytes 40..47 */
         int64_t remote_ms = ntp_ts_to_unix_ms(&buf[40]);
         if (remote_ms < 0) {
