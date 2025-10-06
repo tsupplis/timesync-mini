@@ -1,19 +1,21 @@
 /*
- * ntp_client.c
+ * timesync.c
  *
  * Minimal SNTP client (RFC 5905 subset) -> query server, print offset/delay in
- * ms.
+ * ms. set system time if run as root and offset is > 500ms.
  *
  * Build:
- *   gcc -std=c11 -O2 -Wall -o ntp_client ntp_client.c
+ *   gcc -std=c11 -O2 -Wall -o timesync timesync.c (-socket -lnsl for Solaris)
+ *  
  *
  * Usage:
- *   ./ntp_client                    # query pool.ntp.org
- *   ./ntp_client -server time.google.com -timeout-ms 1500 -retries 2 -syslog
+ *   ./timesync                    # query pool.ntp.org
+ *   ./timesync -server time.google.com -timeout-ms 1500 -retries 2 -syslog
  *
  * Notes:
  * - No external libraries required (uses BSD sockets).
- * - Works on Linux/macOS. Requires linking to standard C library only.
+ * - Works on Linux/macOS/Solaris/*BSD. Requires linking to standard C library only (with exception of 
+ * solaris where -lsocket -lnsl may be needed).
  */
 
 #include <arpa/inet.h>
