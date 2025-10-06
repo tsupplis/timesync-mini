@@ -41,9 +41,8 @@
 
 /* CLI defaults */
 static const char *default_server = "pool.ntp.org";
-static int timeout_ms = 2000;
-static int retries = 3;
-static int use_syslog = 0;
+static const int timeout_ms = 2000;
+static const int retries = 3;
 
 /* Convert timeval to milliseconds since epoch */
 static int64_t tv_to_ms(const struct timeval *tv) {
@@ -69,13 +68,13 @@ static int64_t ntp_ts_to_unix_ms(const uint8_t *buf) {
 /* Log function with time prefix (always to stderr) */
 static void stderr_log(const char *fmt, ...) {
     time_t now = time(NULL);
-    struct tm tm_now;
-    char time_str[32];
-    localtime_r(&now, &tm_now);
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_now);
+    struct tm local_tm;
+    char local_time_str[32];
+    localtime_r(&now, &local_tm);
+    strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
 
     char full_fmt[1024];
-    snprintf(full_fmt, sizeof(full_fmt), "%s %s\n", time_str, fmt);
+    snprintf(full_fmt, sizeof(full_fmt), "%s %s\n", local_time_str, fmt);
 
     va_list args;
     va_start(args, fmt);
@@ -177,8 +176,7 @@ static int do_ntp_query(const char *server, int timeout_ms,
             sock = -1;
             continue;
         }
-        
-        
+
         /* Check version (1-4 valid) */
         int protocol_version = (buf[0] >> 3) & 0x07;
         if (protocol_version < 1 || protocol_version > 4) {
@@ -187,7 +185,7 @@ static int do_ntp_query(const char *server, int timeout_ms,
             close(sock);
             continue;
         }
- 
+
         /* remote transmit timestamp is at bytes 40..47 */
         int64_t remote_ms = ntp_ts_to_unix_ms(&buf[40]);
         if (remote_ms < 0) {
@@ -249,6 +247,15 @@ void usage(const char *prog) {
     fprintf(stderr, "  -h           Show this help message\n");
 }
 
+typedef struct _config_t {
+    const char *server;
+    int timeout_ms;
+    int retries;
+    int verbose;
+    int test_only;
+    int use_syslog;
+} config_t;
+
 /**
  * Main function algorithm (synopsis):
  * 1. Initialize network and time synchronization parameters.
@@ -259,34 +266,35 @@ void usage(const char *prog) {
  * 6. Handle errors and clean up resources before exiting.
  */
 int main(int argc, char **argv) {
+    config_t config = {0};
     int opt;
-    const char *server = default_server;
-    int verbose = 0;
-    int test_only = 0;
+    config.server = default_server;
+    config.verbose = 0;
+    config.test_only = 0;
 
     while ((opt = getopt(argc, argv, "t:r:vnsh")) != -1) {
         if (opt == 's') {
-            use_syslog = 1;
+            config.use_syslog = 1;
         } else if (opt == 't') {
-            timeout_ms = atoi(optarg);
+            config.timeout_ms = atoi(optarg);
             if (timeout_ms > 6000) {
-                timeout_ms = 6000;
+                config.timeout_ms = 6000;
             }
-            if (timeout_ms <= 0) {
-                timeout_ms = 2000;
+            if (config.timeout_ms <= 0) {
+                config.timeout_ms = 2000;
             }
         } else if (opt == 'r') {
-            retries = atoi(optarg);
+            config.retries = atoi(optarg);
             if (retries <= 0) {
-                retries = 3;
+                config.retries = 3;
             }
             if (retries > 10) {
-                retries = 10;
+                config.retries = 10;
             }
         } else if (opt == 'v') {
-            verbose = 1;
+            config.verbose = 1;
         } else if (opt == 'n') {
-            test_only = 1;
+            config.test_only = 1;
         } else if (opt == 'h') {
             usage("timesync");
             exit(0);
@@ -296,20 +304,21 @@ int main(int argc, char **argv) {
     }
     /* If there is a positional argument left, treat it as the server */
     if (optind < argc) {
-        server = argv[optind];
+        config.server = argv[optind];
     }
 
     /* Disable syslog in test mode */
-    if (test_only) {
-        use_syslog = 0;
+    if (config.test_only) {
+        config.use_syslog = 0;
     }
-    if (verbose) {
-        stderr_log("DEBUG Using server: %s", server);
-        stderr_log("DEBUG Timeout: %d ms, Retries: %d, Syslog: %s", timeout_ms,
-                   retries, use_syslog ? "on" : "off");
+    if (config.verbose) {
+        stderr_log("DEBUG Using server: %s", config.server);
+        stderr_log("DEBUG Timeout: %d ms, Retries: %d, Syslog: %s",
+                   config.timeout_ms, config.retries,
+                   config.use_syslog ? "on" : "off");
     }
 
-    if (use_syslog) {
+    if (config.use_syslog) {
         openlog("ntp_client", LOG_PID | LOG_CONS, LOG_USER);
     }
 
@@ -320,12 +329,12 @@ int main(int argc, char **argv) {
 
     for (attempt = 0; attempt < retries; ++attempt) {
         server_addr[0] = '\0';
-        if (verbose) {
+        if (config.verbose) {
             stderr_log("DEBUG Attempt (%d) at NTP query on %s ...", attempt + 1,
-                       server);
+                       config.server);
         }
-        if (do_ntp_query(server, timeout_ms, &local_before_ms, &remote_ms,
-                         &local_after_ms, server_addr,
+        if (do_ntp_query(config.server, config.timeout_ms, &local_before_ms,
+                         &remote_ms, &local_after_ms, server_addr,
                          sizeof(server_addr)) == 0) {
             success = 1;
             break;
@@ -336,10 +345,10 @@ int main(int argc, char **argv) {
 
     if (!success) {
         stderr_log("ERROR Failed to contact NTP server %s after %d attempts",
-                   server, retries);
-        if (use_syslog) {
-            syslog(LOG_ERR, "NTP query failed for %s after %d attempts", server,
-                   retries);
+                   config.server, config.retries);
+        if (config.use_syslog) {
+            syslog(LOG_ERR, "NTP query failed for %s after %d attempts",
+                   config.server, config.retries);
             closelog();
         }
         return 2;
@@ -355,17 +364,26 @@ int main(int argc, char **argv) {
     int64_t avg_local_ms = (local_before_ms + local_after_ms) / 2;
     int64_t epoch_diff_ms = remote_ms - avg_local_ms;
     int64_t roundtrip_ms = local_after_ms - local_before_ms;
+    time_t now = local_before_ms / 1000;
+    struct tm local_tm;
+    char local_time_str[64];
+    localtime_r(&now, &local_tm);
+    strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%dT%H:%M:%S%z",
+             &local_tm);
 
     /* Print output */
     time_t remote_sec = (time_t)(remote_ms / 1000);
-    struct tm rtm;
-    localtime_r(&remote_sec, &rtm);
-    char timestr[64];
-    strftime(timestr, sizeof(timestr), "%Y-%m-%dT%H:%M:%S%z", &rtm);
+    struct tm remote_tm;
+    localtime_r(&remote_sec, &remote_tm);
+    char remote_time_str[64];
+    strftime(remote_time_str, sizeof(remote_time_str), "%Y-%m-%dT%H:%M:%S%z",
+             &remote_tm);
 
-    if (verbose) {
-        stderr_log("DEBUG Server: %s (%s)", server, server_addr);
-        stderr_log("DEBUG Remote time: %s.%03lld", timestr,
+    if (config.verbose) {
+        stderr_log("DEBUG Server: %s (%s)", config.server, server_addr);
+        stderr_log("DEBUG Local time: %s.%03lld", local_time_str,
+                   (long long)(local_after_ms %1000));
+        stderr_log("DEBUG Remote time: %s.%03lld", remote_time_str,
                    (long long)(remote_ms % 1000));
         stderr_log("DEBUG Local before(ms): %lld", (long long)local_before_ms);
         stderr_log("DEBUG Local after(ms): %lld", (long long)local_after_ms);
@@ -373,9 +391,9 @@ int main(int argc, char **argv) {
                    (long long)roundtrip_ms);
         stderr_log("DEBUG Estimated offset remote - local(ms): %lld",
                    (long long)epoch_diff_ms);
-        if (use_syslog) {
+        if (config.use_syslog) {
             syslog(LOG_INFO, "NTP server=%s addr=%s offset_ms=%lld rtt_ms=%lld",
-                   server, server_addr, (long long)epoch_diff_ms,
+                   config.server, server_addr, (long long)epoch_diff_ms,
                    (long long)roundtrip_ms);
         }
     }
@@ -384,7 +402,7 @@ int main(int argc, char **argv) {
     if (llabs(roundtrip_ms) < 0 || llabs(roundtrip_ms) > 10000) {
         stderr_log("ERROR Invalid roundtrip time: %lld ms",
                    (long long)roundtrip_ms);
-        if (use_syslog) {
+        if (config.use_syslog) {
             syslog(LOG_ERR, "Invalid suspiciously long roundtrip time: %lld ms",
                    (long long)roundtrip_ms);
             closelog();
@@ -396,37 +414,37 @@ int main(int argc, char **argv) {
     if (llabs(epoch_diff_ms) > 0 && llabs(epoch_diff_ms) < 500) {
         /* Only adjust if remote year is >= 2025 to avoid issues with
          * misconfigured servers */
-        if (verbose) {
+        if (config.verbose) {
             stderr_log("INFO Delta < 500ms, not setting system time.");
-            if (use_syslog) {
+            if (config.use_syslog) {
                 syslog(LOG_INFO, "Delta not < 500ms, not setting system time");
                 closelog();
             }
         }
-        if (use_syslog) {
+        if (config.use_syslog) {
             closelog();
         }
         return 0;
     }
     /* Check remote year */
-    if (rtm.tm_year + 1900 < 2025 || rtm.tm_year + 1900 > 2200) {
+    if (remote_tm.tm_year + 1900 < 2025 || remote_tm.tm_year + 1900 > 2200) {
         stderr_log("ERROR Remote year is less than 2025, not adjusting "
                    "system time.");
-        if (use_syslog) {
+        if (config.use_syslog) {
             syslog(LOG_ERR, "Remote year < 2025, not adjusting system time");
             closelog();
         }
         return 1;
     }
-    if (test_only) {
-        if (use_syslog) {
+    if (config.test_only) {
+        if (config.use_syslog) {
             closelog();
         }
         return 0;
     }
     if (getuid() != 0) {
         stderr_log("WARNING Not root, not setting system time.");
-        if (use_syslog) {
+        if (config.use_syslog) {
             openlog("ntp_client", LOG_PID | LOG_CONS, LOG_USER);
             syslog(LOG_WARNING, "Not root, not setting system time");
             closelog();
@@ -448,18 +466,18 @@ int main(int argc, char **argv) {
     int rc = settimeofday(&new_time, NULL);
 #endif
     if (!rc) {
-        stderr_log("INFO System time set using %s (%s.%03lld)", api, timestr,
-                   (long long)(remote_ms % 1000));
-        if (use_syslog) {
+        stderr_log("INFO System time set using %s (%s.%03lld)", api,
+                   remote_time_str, (long long)(remote_ms % 1000));
+        if (config.use_syslog) {
             syslog(LOG_INFO, "System time set using %s (%s.%03lld)", api,
-                   timestr, (long long)(remote_ms % 1000));
+                   remote_time_str, (long long)(remote_ms % 1000));
             closelog();
         }
         return 0;
     }
     stderr_log("ERROR Failed to adjust system time with %s: %s", api,
                strerror(errno));
-    if (use_syslog) {
+    if (config.use_syslog) {
         syslog(LOG_ERR, "Failed to adjust system time with %s: %s", api,
                strerror(errno));
         closelog();
