@@ -183,6 +183,7 @@ static int do_ntp_query(const char *server, int timeout_ms,
             stderr_log("WARNING Invalid version in NTP response: %d",
                        protocol_version);
             close(sock);
+            sock = -1;
             continue;
         }
 
