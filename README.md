@@ -82,10 +82,3 @@ The program uses the standard `log` package for logging. If verbose logging is e
 - Standard C library only (BSD sockets)
 - On Solaris/Illumos: additional `-lsocket -lnsl` linker flags required
 
-## License
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-This project is licensed under the MIT License. See [LICENSE.md](LICENSE.md) for details.
-
-Both the C and Go implementations are released under the MIT License.
