@@ -1,5 +1,5 @@
 CC=cc
-CFLAGS= -Os -Wall -Wextra -DUSE_CLOCK_SETTIME
+CFLAGS= -O2 -Wall -Wextra -DUSE_CLOCK_SETTIME
 #for solaris
 #LDFLAGS= -lsocket -lnsl
 STRIP=strip
