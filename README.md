@@ -1,10 +1,10 @@
 # timesync-mini
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
-![C](https://img.shields.io/badge/c-00599C?style=flat&logo=c&logoColor=white)
-![Go](https://img.shields.io/badge/go-00ADD8?style=flat&logo=go&logoColor=white)
 `timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in two implementations:
+
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![C](https://img.shields.io/badge/language-c-blue.svg)
+![C](https://img.shields.io/badge/language-go-blue.svg)
 
 - **C implementation** (`c/`): Minimal dependencies, uses only standard C library and BSD sockets
 - **Go implementation** (`go/`): Uses the beevik/ntp package for NTP queries
