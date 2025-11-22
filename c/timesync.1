@@ -1,0 +1,120 @@
+.TH TIMESYNC 1 "November 2025" "timesync" "User Commands"
+.SH NAME
+timesync \- minimal SNTP client for time synchronization
+.SH SYNOPSIS
+.B timesync
+[\fB\-t\fR \fItimeout_ms\fR]
+[\fB\-r\fR \fIretries\fR]
+[\fB\-n\fR]
+[\fB\-v\fR]
+[\fB\-s\fR]
+[\fB\-h\fR]
+[\fIserver\fR]
+.SH DESCRIPTION
+.B timesync
+is a minimal SNTP (Simple Network Time Protocol) client that queries NTP servers
+to synchronize system time. It implements a subset of RFC 5905.
+.PP
+When run, timesync queries the specified NTP server, calculates the time offset
+and round-trip delay, and optionally sets the system time if the offset exceeds
+500 milliseconds and the program is run with root privileges.
+.SH OPTIONS
+.TP
+.I server
+NTP server to query (default: pool.ntp.org)
+.TP
+.BR \-t " " \fItimeout_ms\fR
+Timeout in milliseconds (default: 2000, maximum: 6000)
+.TP
+.BR \-r " " \fIretries\fR
+Number of retries on failure (default: 3, maximum: 10)
+.TP
+.BR \-n
+Test mode \- do not set system time even if offset is significant
+.TP
+.BR \-v
+Verbose output \- print detailed timing information
+.TP
+.BR \-s
+Enable syslog logging
+.TP
+.BR \-h
+Show help message and exit
+.SH BEHAVIOR
+.B timesync
+performs the following actions:
+.IP \(bu 2
+Queries the NTP server with the specified number of retries
+.IP \(bu 2
+Calculates the time offset between local and remote time
+.IP \(bu 2
+Calculates the round-trip delay
+.IP \(bu 2
+Sets system time only if:
+.RS 4
+.IP \- 2
+The program is run as root
+.IP \- 2
+The absolute offset is greater than 500 milliseconds
+.IP \- 2
+The remote year is between 2025 and 2200 (sanity check)
+.IP \- 2
+The round-trip time is less than 10 seconds
+.RE
+.SH EXIT STATUS
+.TP
+.B 0
+Success
+.TP
+.B 1
+Error (e.g., query failed, invalid response, sanity check failed)
+.SH EXAMPLES
+Query default NTP server (pool.ntp.org):
+.PP
+.nf
+.RS
+timesync
+.RE
+.fi
+.PP
+Query Google's NTP server with custom timeout and retries:
+.PP
+.nf
+.RS
+timesync \-t 1500 \-r 2 time.google.com
+.RE
+.fi
+.PP
+Run in verbose mode with syslog logging:
+.PP
+.nf
+.RS
+sudo timesync \-v \-s
+.RE
+.fi
+.PP
+Test mode (no system time adjustment):
+.PP
+.nf
+.RS
+timesync \-n \-v
+.RE
+.fi
+.SH NOTES
+.IP \(bu 2
+The program uses BSD sockets and requires no external libraries beyond the standard C library.
+.IP \(bu 2
+On Solaris/Illumos, linking with \fB\-lsocket \-lnsl\fR may be required.
+.IP \(bu 2
+The program uses \fBclock_settime(2)\fR if available (when compiled with \fB\-DUSE_CLOCK_SETTIME\fR), otherwise falls back to \fBsettimeofday(2)\fR.
+.IP \(bu 2
+Setting system time requires root privileges.
+.SH SUPPORTED PLATFORMS
+Linux, macOS, FreeBSD, NetBSD, OpenBSD, DragonflyBSD, Solaris, Illumos, Haiku
+.SH SEE ALSO
+.BR ntpd (8),
+.BR ntpdate (8),
+.BR clock_settime (2),
+.BR settimeofday (2)
+.SH AUTHORS
+Written for minimal system time synchronization on BSD and Unix-like systems.
