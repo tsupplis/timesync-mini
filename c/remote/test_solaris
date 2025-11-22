@@ -1,9 +1,0 @@
-#!/bin/bash
-if [ -z "$1" ];then
-    echo "ERR: must specify host"
-    exit 1
-fi
-ssh "$1" mkdir -p work/timesync
-scp Makefile timesync.c "$1:work/timesync"
-ssh "$1" "(cd work/timesync; LDFLAGS='-lsocket -lnsl' make clean all)"
-ssh "$1" "(cd work/timesync; sudo date '100613382025.01';sudo ./timesync -v 192.168.1.1;sleep 1;date)"
