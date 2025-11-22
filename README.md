@@ -19,7 +19,7 @@ timesync-mini [options] <ntp-server>
 
 ### Options
 
-- `-t` : Run in test mode (does not actually set the system time).
+- `-n` : Run in test mode (does not actually set the system time).
 - `-v` : Enable verbose logging.
 - `-h` : Display usage information.
 
@@ -38,7 +38,7 @@ timesync-mini time.nist.gov
 ### Run in test mode
 
 ```sh
-timesync-mini -t time.nist.gov
+timesync-mini -n time.nist.gov
 ```
 
 ### Enable verbose logging
