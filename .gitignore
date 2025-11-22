@@ -69,5 +69,5 @@ dkms.conf
 # Project specific
 go.sum
 timesync
-timesync*
+timesync-*
 local/**
