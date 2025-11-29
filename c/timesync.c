@@ -270,6 +270,8 @@ int main(int argc, char **argv) {
     config_t config = {0};
     int opt;
     config.server = default_server;
+    config.timeout_ms = timeout_ms;
+    config.retries = retries;
     config.verbose = 0;
     config.test_only = 0;
 
@@ -278,7 +280,7 @@ int main(int argc, char **argv) {
             config.use_syslog = 1;
         } else if (opt == 't') {
             config.timeout_ms = atoi(optarg);
-            if (timeout_ms > 6000) {
+            if (config.timeout_ms > 6000) {
                 config.timeout_ms = 6000;
             }
             if (config.timeout_ms <= 0) {
@@ -286,10 +288,10 @@ int main(int argc, char **argv) {
             }
         } else if (opt == 'r') {
             config.retries = atoi(optarg);
-            if (retries <= 0) {
+            if (config.retries <= 0) {
                 config.retries = 3;
             }
-            if (retries > 10) {
+            if (config.retries > 10) {
                 config.retries = 10;
             }
         } else if (opt == 'v') {
@@ -328,7 +330,7 @@ int main(int argc, char **argv) {
     char server_addr[INET6_ADDRSTRLEN] = {0};
     int success = 0;
 
-    for (attempt = 0; attempt < retries; ++attempt) {
+    for (attempt = 0; attempt < config.retries; ++attempt) {
         server_addr[0] = '\0';
         if (config.verbose) {
             stderr_log("DEBUG Attempt (%d) at NTP query on %s ...", attempt + 1,
