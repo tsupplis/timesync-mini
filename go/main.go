@@ -141,10 +141,10 @@ func main() {
 
 	for attempt := 0; attempt < cfg.Retries; attempt++ {
 		for _, server := range cfg.Servers {
-			if cfg.Verbose && attempt > 0 {
-				slog.Debug("Retry attempt", "attempt", attempt+1, "server", server)
+			if cfg.Verbose {
+				slog.Debug("Attempt at NTP query", "attempt", attempt+1, "server", server)
 			}
-			err = timeSync(server, cfg.Test, time.Duration(cfg.TimeoutMS)*time.Millisecond, syslogWriter)
+			err = timeSync(server, cfg, time.Duration(cfg.TimeoutMS)*time.Millisecond, syslogWriter)
 			if err == nil {
 				os.Exit(0)
 			}
@@ -176,7 +176,8 @@ func main() {
 // - syslog: A syslog.Writer to log messages to the system log.
 //
 // Returns an error if any step fails.
-func timeSync(server string, test bool, timeout time.Duration, syslog *syslog.Writer) error {
+func timeSync(server string, cfg *Config, timeout time.Duration, syslog *syslog.Writer) error {
+	test := cfg.Test
 	var yearLaps int64 = 365 * 24 * 60 * 60 * 1000
 	ips, err := net.LookupIP(server)
 	if err != nil {
@@ -186,8 +187,9 @@ func timeSync(server string, test bool, timeout time.Duration, syslog *syslog.Wr
 		}
 		return err
 	}
-	server = ips[0].String()
-	slog.Debug("Network time server", "server", server)
+	serverIP := ips[0].String()
+	slog.Debug("Server", "name", server, "ip", serverIP)
+	server = serverIP
 	prepoch := time.Now().UnixMilli()
 
 	// Query NTP with timeout
@@ -224,6 +226,23 @@ func timeSync(server string, test bool, timeout time.Duration, syslog *syslog.Wr
 	}
 	ntime = ntime.Add(time.Millisecond * (time.Duration)((nowpoch-prepoch)/2))
 	ntimepoch = ntime.UnixMilli()
+	roundtrip := nowpoch - prepoch
+	offset := ntimepoch - nowpoch
+
+	if cfg.Verbose {
+		localTime := time.Unix(prepoch/1000, (prepoch%1000)*1000000)
+		remoteTime := time.Unix(ntimepoch/1000, (ntimepoch%1000)*1000000)
+		slog.Debug("Local time", "time", localTime.Format("2006-01-02T15:04:05-0700"), "ms", prepoch%1000)
+		slog.Debug("Remote time", "time", remoteTime.Format("2006-01-02T15:04:05-0700"), "ms", ntimepoch%1000)
+		slog.Debug("Local before(ms)", "ms", prepoch)
+		slog.Debug("Local after(ms)", "ms", nowpoch)
+		slog.Debug("Estimated roundtrip(ms)", "ms", roundtrip)
+		slog.Debug("Estimated offset remote - local(ms)", "ms", offset)
+		if syslog != nil {
+			syslog.Info(fmt.Sprintf("NTP server=%s addr=%s offset_ms=%d rtt_ms=%d", server, serverIP, offset, roundtrip))
+		}
+	}
+
 	if delta > yearLaps {
 		slog.Info("Time is off by more than a year, not adjusting", "delta", delta)
 	} else {
@@ -242,20 +261,14 @@ func timeSync(server string, test bool, timeout time.Duration, syslog *syslog.Wr
 				}
 			}
 		} else {
-			slog.Debug("Time is already in sync")
-			if syslog != nil {
-				syslog.Info("Time is already in sync")
+			if cfg.Verbose {
+				slog.Info("Delta < 500ms, not setting system time.")
+				if syslog != nil {
+					syslog.Info("Delta < 500ms, not setting system time")
+				}
 			}
 		}
 	}
-	slog.Debug("Before time", "sys-epoch", nowpoch)
-	slog.Debug("Network time", "server", server, "network-epoch", ntime.UnixMilli())
-	slog.Debug("Time difference", "epoch-diff", ntimepoch-nowpoch)
-	slog.Debug("Current time", "time", time.Now().Format(time.RFC3339))
-	if syslog != nil {
-		syslog.Info(fmt.Sprintf("Time difference: %vms", ntimepoch-nowpoch))
-	}
-	slog.Debug("Call time < 500 ms", "time", nowpoch-prepoch)
 
 	return nil
 }
