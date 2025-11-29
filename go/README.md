@@ -98,6 +98,38 @@ The Go implementation includes platform-specific time setting code for:
 
 Each platform has its own `settime-*.go` file with the appropriate system call implementation.
 
+## Algorithm
+
+```mermaid
+flowchart TD
+    A[Start NTP Query] --> B[Capture prepoch = Now]
+    B --> C[Query NTP using beevik/ntp library]
+    C --> D[Get response.ClockOffset from library]
+    D --> E[Capture nowpoch = Now]
+    
+    E --> F[Calculate ntime<br/>= Now + ClockOffset]
+    F --> G{Year valid?<br/>2025-2200}
+    
+    G -->|No| H[Error: Invalid year]
+    G -->|Yes| I{nowpoch - prepoch<br/>> 10000ms?}
+    
+    I -->|Yes| J[Error: Query too long]
+    I -->|No| K[Adjust ntime by<br/>+ nowpoch - prepoch / 2]
+    
+    K --> L[Calculate delta<br/>= abs nowpoch - ntime]
+    L --> M{delta<br/>< 500ms?}
+    
+    M -->|Yes| N[Skip adjustment]
+    M -->|No| O[Set system time to ntime]
+    
+    H --> P[Exit]
+    J --> P
+    N --> P
+    O --> P
+```
+
+**Note:** The Go implementation uses the `beevik/ntp` library which handles the low-level SNTP protocol internally. The `ClockOffset` returned by the library is equivalent to the offset calculation in C/Rust implementations.
+
 ## Supported Platforms
 
 - Linux (amd64, 386, arm, riscv64, ppc64le)

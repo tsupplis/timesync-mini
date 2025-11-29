@@ -115,6 +115,41 @@ A man page is provided in `timesync.1`. View it with:
 man ./timesync.1
 ```
 
+## Algorithm
+
+```mermaid
+flowchart TD
+    A[Start NTP Query] --> B[Send NTP Request]
+    B --> C[Capture local_before_ms]
+    C --> D[Receive NTP Response]
+    D --> E[Capture local_after_ms]
+    E --> F[Extract remote_ms from packet]
+    
+    F --> G[Calculate avg_local_ms<br/>= local_before_ms + local_after_ms / 2]
+    G --> H[Calculate offset_ms<br/>= remote_ms - avg_local_ms]
+    H --> I[Calculate roundtrip_ms<br/>= local_after_ms - local_before_ms]
+    
+    I --> J{roundtrip_ms<br/>> 10000ms?}
+    J -->|Yes| K[Error: RTT too long]
+    J -->|No| L{abs offset_ms<br/>< 500ms?}
+    
+    L -->|Yes| M[Skip adjustment]
+    L -->|No| N{Year valid?<br/>2025-2200}
+    
+    N -->|No| O[Error: Invalid year]
+    N -->|Yes| P[Calculate half_rtt<br/>= roundtrip_ms / 2]
+    
+    P --> Q[Calculate new_time_ms<br/>= remote_ms + half_rtt]
+    Q --> R[Set system time using<br/>clock_settime or settimeofday]
+    
+    K --> S[Exit]
+    M --> S
+    O --> S
+    R --> S
+```
+
+**Note:** The Rust implementation uses the identical algorithm with added overflow safety checks (`checked_add()`).
+
 ## Supported Platforms
 
 - Linux
