@@ -251,7 +251,7 @@ void usage(const char *prog) {
             "  server       NTP server to query (default: pool.ntp.org)\n");
     fprintf(stderr, "  -t timeout   Timeout in ms (default: 2000)\n");
     fprintf(stderr, "  -r retries   Number of retries (default: 3)\n");
-    fprintf(stderr, "  -n           No effect\n");
+    fprintf(stderr, "  -n           Test mode (no system time adjustment)\n");
     fprintf(stderr, "  -v           Verbose output\n");
     fprintf(stderr, "  -s           Enable syslog logging\n");
     fprintf(stderr, "  -h           Show this help message\n");
@@ -453,8 +453,8 @@ int main(int argc, char **argv) {
     }
     /* Check remote year */
     if (remote_tm.tm_year + 1900 < 2025 || remote_tm.tm_year + 1900 > 2200) {
-        stderr_log("ERROR Remote year is less than 2025, not adjusting "
-                   "system time.");
+        stderr_log("ERROR Remote year is %d, not adjusting system time.",
+                   remote_tm.tm_year + 1900);
         if (config.use_syslog) {
             syslog(LOG_ERR, "Remote year < 2025, not adjusting system time");
         }
