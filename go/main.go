@@ -123,7 +123,7 @@ func main() {
 
 	var syslogWriter *syslog.Writer
 	if cfg.UseSyslog {
-		syslogWriter, err = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "timesync")
+		syslogWriter, err = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "ntp_client")
 		if err != nil {
 			slog.Error("Failed to create syslog, ignored", "error", err)
 		} else {
@@ -202,12 +202,12 @@ func timeSync(server string, test bool, timeout time.Duration, syslog *syslog.Wr
 	}
 	ntime := time.Now().Add(response.ClockOffset)
 	nyear := ntime.Year()
-	if nyear < 2025 {
-		slog.Error("Year is less than 2025", "year", nyear)
+	if nyear < 2025 || nyear > 2200 {
+		slog.Error("Year is out of valid range (2025-2200)", "year", nyear)
 		if syslog != nil {
-			syslog.Err(fmt.Sprintf("Year is less than 2025: %v", nyear))
+			syslog.Err(fmt.Sprintf("Year is out of valid range (2025-2200): %v", nyear))
 		}
-		return errors.New("year is less than 2025")
+		return errors.New("year is out of valid range")
 	}
 	nowpoch := time.Now().UnixMilli()
 	ntimepoch := ntime.UnixMilli()
@@ -215,14 +215,14 @@ func timeSync(server string, test bool, timeout time.Duration, syslog *syslog.Wr
 	if delta < 0 {
 		delta = -delta
 	}
-	if nowpoch-prepoch > 500 {
+	if nowpoch-prepoch > 10000 {
 		slog.Error("Time sync took too long", "duration", nowpoch-prepoch)
 		if syslog != nil {
-			syslog.Err(fmt.Sprintf("Time sync took too long (%v)", nowpoch-prepoch))
+			syslog.Err(fmt.Sprintf("Time sync took too long (%vms)", nowpoch-prepoch))
 		}
 		return nil
 	}
-	ntime = ntime.Add(time.Millisecond * (time.Duration)((nowpoch-prepoch)/4))
+	ntime = ntime.Add(time.Millisecond * (time.Duration)((nowpoch-prepoch)/2))
 	ntimepoch = ntime.UnixMilli()
 	if delta > yearLaps {
 		slog.Info("Time is off by more than a year, not adjusting", "delta", delta)

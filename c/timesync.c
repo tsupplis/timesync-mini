@@ -474,10 +474,11 @@ int main(int argc, char **argv) {
     }
     /* Check remote year */
     if (remote_tm.tm_year + 1900 < 2025 || remote_tm.tm_year + 1900 > 2200) {
-        stderr_log("ERROR Remote year is %d, not adjusting system time.",
+        stderr_log("ERROR Remote year is out of valid range (2025-2200): %d",
                    remote_tm.tm_year + 1900);
         if (config.use_syslog) {
-            syslog(LOG_ERR, "Remote year < 2025, not adjusting system time");
+            syslog(LOG_ERR, "Remote year is out of valid range (2025-2200): %d",
+                   remote_tm.tm_year + 1900);
         }
         return 1;
     }
