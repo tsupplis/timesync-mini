@@ -1,77 +1,90 @@
 # timesync-mini
 
-`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in two implementations:
+![C](https://img.shields.io/badge/C-00599C?style=flat&logo=c&logoColor=white)
+![Go](https://img.shields.io/badge/Go-00ADD8?style=flat&logo=go&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![C](https://img.shields.io/badge/language-c-blue.svg)
-![C](https://img.shields.io/badge/language-go-blue.svg)
+`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in three implementations:
 
 - **C implementation** (`c/`): Minimal dependencies, uses only standard C library and BSD sockets
 - **Go implementation** (`go/`): Uses the beevik/ntp package for NTP queries
+- **Rust implementation** (`rust/`): Direct port of C version with Rust's safety guarantees
 
-Both implementations support verbose logging and test mode.
+All implementations support the same command-line interface for consistency.
 
 ## Usage
 
 ```sh
-timesync-mini [options] <ntp-server>
+timesync [options] [ntp-server]
 ```
 
 ### Options
 
-- `-n` : Run in test mode (does not actually set the system time).
-- `-v` : Enable verbose logging.
-- `-h` : Display usage information.
+All three implementations support the same options:
+
+- `-t timeout` : Timeout in milliseconds (default: 2000, max: 6000)
+- `-r retries` : Number of retries (default: 3, max: 10)
+- `-n` : Run in test mode (does not actually set the system time)
+- `-v` : Enable verbose logging
+- `-s` : Enable syslog logging
+- `-h` : Display usage information
 
 ### Positional Arguments
 
-- `<ntp-server>` : The NTP server to synchronize with. If not provided, defaults to `time.google.com`.
+- `ntp-server` : The NTP server to synchronize with. If not provided, defaults to `pool.ntp.org`.
 
 ## Examples
+
+### Synchronize with default server
+
+```sh
+timesync
+```
 
 ### Synchronize with a specific NTP server
 
 ```sh
-timesync-mini time.nist.gov
+timesync time.google.com
 ```
 
-### Run in test mode
+### With custom timeout and retries
 
 ```sh
-timesync-mini -n time.nist.gov
+timesync -t 1500 -r 2 time.google.com
 ```
 
-### Enable verbose logging
+### Run in test mode with verbose output
 
 ```sh
-timesync-mini -v time.nist.gov
+timesync -n -v
+```
+
+### Enable syslog logging
+
+```sh
+timesync -s -v
 ```
 
 ### Display usage information
 
 ```sh
-timesync-mini -h
+timesync -h
 ```
 
-## Configuration
+## Implementation Comparison
 
-The configuration is parsed from the command line flags and positional arguments. The configuration structure is as follows:
+| Feature | C | Go | Rust |
+|---------|---|----|----|
+| **Dependencies** | Standard C library only | `beevik/ntp` package | `libc`, `chrono` crates |
+| **Binary Size** | ~20-30 KB (stripped) | ~2-3 MB | ~500 KB - 1 MB |
+| **Build System** | Make / cc | Go toolchain / Make | Cargo / Make |
+| **Memory Safety** | Manual | Automatic (GC) | Automatic (compile-time) |
+| **Cross-compile** | Platform-specific | Excellent | Excellent |
+| **Platforms** | Unix-like + Haiku | Unix-like | Unix-like |
+| **Command-line** | Consistent across all | Consistent across all | Consistent across all |
 
-```go
-type Config struct {
-    Server  string
-    Test    bool
-    Verbose bool
-}
-```
-
-## Error Handling
-
-The program differentiates between the `-h` flag for displaying usage information and unknown flags. If an unknown flag is provided, the program will display an error message and the usage information.
-
-## Logging
-
-The program uses the standard `log` package for logging. If verbose logging is enabled, additional information will be logged.
+Each implementation directory contains its own README with specific build and usage instructions.
 
 ## Dependencies
 
@@ -81,4 +94,8 @@ The program uses the standard `log` package for logging. If verbose logging is e
 ### C Implementation
 - Standard C library only (BSD sockets)
 - On Solaris/Illumos: additional `-lsocket -lnsl` linker flags required
+
+### Rust Implementation
+- `libc` 0.2 - For Unix system calls
+- `chrono` 0.4 - For datetime handling and formatting
 

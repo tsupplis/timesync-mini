@@ -1,0 +1,5 @@
+timesync
+timesync-*
+*.swp
+*~
+.DS_Store
