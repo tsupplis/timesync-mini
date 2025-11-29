@@ -34,13 +34,13 @@
 #include <time.h>
 #include <unistd.h>
 
-#define NTP_PORT "123"
+static const char *const default_ntp_port = "123";
 #define NTP_PACKET_SIZE 48
 /* Number of seconds between 1900 (NTP epoch) and 1970 (Unix epoch) */
 #define NTP_UNIX_EPOCH_DIFF 2208988800UL
 
 /* CLI defaults */
-static const char *default_server = "pool.ntp.org";
+static const char *const default_server = "pool.ntp.org";
 static const int timeout_ms = 2000;
 static const int retries = 3;
 
@@ -69,17 +69,23 @@ static int64_t ntp_ts_to_unix_ms(const uint8_t *buf) {
 static void stderr_log(const char *fmt, ...) {
     time_t now = time(NULL);
     struct tm local_tm;
-    char local_time_str[32];
-    localtime_r(&now, &local_tm);
-    strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm);
+    char local_time_str[32] = "";
+    if (localtime_r(&now, &local_tm) != NULL) {
+        if (strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%d %H:%M:%S", &local_tm) == 0) {
+            snprintf(local_time_str, sizeof(local_time_str), "TIME_FORMAT_ERROR");
+        }
+    } else {
+        snprintf(local_time_str, sizeof(local_time_str), "TIME_UNAVAILABLE");
+    }
 
-    char full_fmt[1024];
-    snprintf(full_fmt, sizeof(full_fmt), "%s %s\n", local_time_str, fmt);
-
+    fprintf(stderr, "%s ", local_time_str);
+    
     va_list args;
     va_start(args, fmt);
-    vfprintf(stderr, full_fmt, args);
+    vfprintf(stderr, fmt, args);
     va_end(args);
+    
+    fprintf(stderr, "\n");
 }
 
 /* Build an NTP request packet (48 bytes) */
@@ -106,7 +112,7 @@ static int do_ntp_query(const char *server, int timeout_ms,
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_DGRAM;
 
-    if (getaddrinfo(server, NTP_PORT, &hints, &res) != 0) {
+    if (getaddrinfo(server, default_ntp_port, &hints, &res) != 0) {
         return -1;
     }
 
@@ -369,18 +375,24 @@ int main(int argc, char **argv) {
     int64_t roundtrip_ms = local_after_ms - local_before_ms;
     time_t now = local_before_ms / 1000;
     struct tm local_tm;
-    char local_time_str[64];
-    localtime_r(&now, &local_tm);
-    strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%dT%H:%M:%S%z",
-             &local_tm);
+    char local_time_str[64] = "";
+    if (localtime_r(&now, &local_tm) != NULL) {
+        if (strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%dT%H:%M:%S%z",
+                     &local_tm) == 0) {
+            snprintf(local_time_str, sizeof(local_time_str), "TIME_FORMAT_ERROR");
+        }
+    }
 
     /* Print output */
     time_t remote_sec = (time_t)(remote_ms / 1000);
     struct tm remote_tm;
-    localtime_r(&remote_sec, &remote_tm);
-    char remote_time_str[64];
-    strftime(remote_time_str, sizeof(remote_time_str), "%Y-%m-%dT%H:%M:%S%z",
-             &remote_tm);
+    char remote_time_str[64] = "";
+    if (localtime_r(&remote_sec, &remote_tm) != NULL) {
+        if (strftime(remote_time_str, sizeof(remote_time_str), "%Y-%m-%dT%H:%M:%S%z",
+                     &remote_tm) == 0) {
+            snprintf(remote_time_str, sizeof(remote_time_str), "TIME_FORMAT_ERROR");
+        }
+    }
 
     if (config.verbose) {
         stderr_log("DEBUG Server: %s (%s)", config.server, server_addr);
@@ -402,7 +414,7 @@ int main(int argc, char **argv) {
     }
 
     /* Basic sanity checks for roundtrip time */
-    if (llabs(roundtrip_ms) < 0 || llabs(roundtrip_ms) > 10000) {
+    if (roundtrip_ms < 0 || roundtrip_ms > 10000) {
         stderr_log("ERROR Invalid roundtrip time: %lld ms",
                    (long long)roundtrip_ms);
         if (config.use_syslog) {
@@ -448,7 +460,6 @@ int main(int argc, char **argv) {
     if (getuid() != 0) {
         stderr_log("WARNING Not root, not setting system time.");
         if (config.use_syslog) {
-            openlog("ntp_client", LOG_PID | LOG_CONS, LOG_USER);
             syslog(LOG_WARNING, "Not root, not setting system time");
             closelog();
         }
