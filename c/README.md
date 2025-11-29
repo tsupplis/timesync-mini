@@ -24,6 +24,8 @@ make
 
 The binary will be named `timesync`.
 
+By default, uses `clock_settime` for setting system time (via `-DUSE_CLOCK_SETTIME`).
+
 ### Platform-specific notes
 
 **Solaris/Illumos:**
@@ -39,6 +41,8 @@ The build system automatically uses `timesync_haiku.c` on Haiku systems.
 ```bash
 cc -Os -Wall -Wextra -DUSE_CLOCK_SETTIME -o timesync timesync.c
 ```
+
+To use `settimeofday` instead, omit the `-DUSE_CLOCK_SETTIME` flag.
 
 On Solaris/Illumos:
 ```bash
@@ -71,7 +75,7 @@ cc -Os -Wall -Wextra -DUSE_CLOCK_SETTIME -o timesync timesync.c -lsocket -lnsl
 
 - `-t timeout` : Timeout in milliseconds (default: 2000, max: 6000)
 - `-r retries` : Number of retries (default: 3, max: 10)
-- `-n` : Test mode - do not set system time
+- `-n` : Test mode (no system time adjustment)
 - `-v` : Verbose output
 - `-s` : Enable syslog logging
 - `-h` : Show help message

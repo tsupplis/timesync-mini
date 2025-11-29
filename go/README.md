@@ -47,7 +47,7 @@ make timesync-solaris-amd64
 ## Usage
 
 ```bash
-# Query default server (time.google.com)
+# Query default server (pool.ntp.org)
 ./timesync
 
 # Query specific server
@@ -67,12 +67,10 @@ make timesync-solaris-amd64
 
 - `-t timeout` : Timeout in milliseconds (default: 2000, max: 6000)
 - `-r retries` : Number of retries (default: 3, max: 10)
-- `-n` : Test mode - do not set system time
-- `-v` : Verbose output (enables debug logging)
+- `-n` : Test mode (no system time adjustment)
+- `-v` : Verbose output
 - `-s` : Enable syslog logging
 - `-h` : Show help message
-
-All three implementations (C, Go, and Rust) now support the same command-line options for consistency.
 
 ## System Time Setting
 
@@ -85,8 +83,8 @@ sudo ./timesync
 The program will only set the system time if:
 - Running as root
 - Time offset is greater than 500ms
-- Remote year is >= 2025
-- Query time is less than 500ms
+- Remote year is between 2025 and 2200
+- Round-trip time is less than 10 seconds
 
 ## Platform-specific Time Setting
 
