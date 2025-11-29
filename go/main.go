@@ -19,19 +19,31 @@ import (
 // - Servers: A list of NTP servers to synchronize with.
 // - Verbose: If true, enables verbose output.
 // - Test: If true, runs the application in test mode without setting the system time.
+// - TimeoutMS: Timeout in milliseconds for NTP queries.
+// - Retries: Number of retry attempts.
+// - UseSyslog: If true, enables syslog logging.
 type Config struct {
-	Servers []string
-	Verbose bool
-	Test    bool
+	Servers   []string
+	Verbose   bool
+	Test      bool
+	TimeoutMS int
+	Retries   int
+	UseSyslog bool
 }
 
 func parseConfig() (*Config, error) {
-	cfg := &Config{}
+	cfg := &Config{
+		TimeoutMS: 2000, // default
+		Retries:   3,    // default
+	}
 	showHelp := false
 
 	fs := flag.NewFlagSet("timesync", flag.ExitOnError)
+	fs.IntVar(&cfg.TimeoutMS, "t", 2000, "Timeout in milliseconds (max: 6000)")
+	fs.IntVar(&cfg.Retries, "r", 3, "Number of retries (max: 10)")
 	fs.BoolVar(&cfg.Test, "n", false, "Run in test mode (no action)")
 	fs.BoolVar(&cfg.Verbose, "v", false, "Verbose output")
+	fs.BoolVar(&cfg.UseSyslog, "s", false, "Enable syslog logging")
 	fs.BoolVar(&showHelp, "h", false, "Display usage")
 	// Override the default usage message to include the ntp server argument.
 	fs.Usage = func() {
@@ -46,10 +58,31 @@ func parseConfig() (*Config, error) {
 		return nil, nil
 	}
 
+	// Validate and clamp timeout
+	if cfg.TimeoutMS > 6000 {
+		cfg.TimeoutMS = 6000
+	}
+	if cfg.TimeoutMS <= 0 {
+		cfg.TimeoutMS = 2000
+	}
+
+	// Validate and clamp retries
+	if cfg.Retries > 10 {
+		cfg.Retries = 10
+	}
+	if cfg.Retries <= 0 {
+		cfg.Retries = 3
+	}
+
+	// Disable syslog in test mode
+	if cfg.Test {
+		cfg.UseSyslog = false
+	}
+
 	// Check if the NTP server is provided as a positional argument.
 	args := fs.Args()
 	if len(args) == 0 {
-		cfg.Servers = []string{"time.google.com"}
+		cfg.Servers = []string{"pool.ntp.org"}
 	} else {
 		cfg.Servers = args
 	}
@@ -57,7 +90,6 @@ func parseConfig() (*Config, error) {
 }
 
 func main() {
-	syslog, _ := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "timesync")
 	cfg, err := parseConfig()
 
 	if err != nil {
@@ -67,22 +99,41 @@ func main() {
 		os.Exit(0)
 	}
 
+	var syslogWriter *syslog.Writer
+	if cfg.UseSyslog {
+		syslogWriter, err = syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "timesync")
+		if err != nil {
+			slog.Error("Failed to create syslog, ignored", "error", err)
+		} else {
+			slog.Debug("Syslog created")
+		}
+	}
+
 	if cfg.Verbose {
 		slog.SetLogLoggerLevel(slog.LevelDebug)
+		slog.Debug("Using server", "server", cfg.Servers)
+		slog.Debug("Config", "timeout", cfg.TimeoutMS, "retries", cfg.Retries, "syslog", cfg.UseSyslog)
 	} else {
 		slog.SetLogLoggerLevel(slog.LevelInfo)
 	}
-	slog.Debug("Server config", "config", cfg.Servers)
-	if err != nil && syslog != nil {
-		slog.Error("Failed to create syslog, ignored", "error", err)
-	} else {
-		slog.Debug("Syslog created")
-	}
-	for _, server := range cfg.Servers {
-		err = timeSync(server, cfg.Test, syslog)
-		if err == nil {
-			os.Exit(0)
+
+	for attempt := 0; attempt < cfg.Retries; attempt++ {
+		for _, server := range cfg.Servers {
+			if cfg.Verbose && attempt > 0 {
+				slog.Debug("Retry attempt", "attempt", attempt+1, "server", server)
+			}
+			err = timeSync(server, cfg.Test, time.Duration(cfg.TimeoutMS)*time.Millisecond, syslogWriter)
+			if err == nil {
+				os.Exit(0)
+			}
+			if attempt < cfg.Retries-1 {
+				time.Sleep(200 * time.Millisecond)
+			}
 		}
+	}
+	slog.Error("Failed to contact NTP server after retries", "attempts", cfg.Retries)
+	if syslogWriter != nil {
+		syslogWriter.Err(fmt.Sprintf("NTP query failed after %d attempts", cfg.Retries))
 	}
 	os.Exit(-1)
 }
@@ -99,10 +150,11 @@ func main() {
 // Parameters:
 // - server: The NTP server to synchronize with.
 // - test: If true, the function runs in test mode and does not actually set the system time.
+// - timeout: The timeout duration for the NTP query.
 // - syslog: A syslog.Writer to log messages to the system log.
 //
 // Returns an error if any step fails.
-func timeSync(server string, test bool, syslog *syslog.Writer) error {
+func timeSync(server string, test bool, timeout time.Duration, syslog *syslog.Writer) error {
 	var yearLaps int64 = 365 * 24 * 60 * 60 * 1000
 	ips, err := net.LookupIP(server)
 	if err != nil {
@@ -115,14 +167,18 @@ func timeSync(server string, test bool, syslog *syslog.Writer) error {
 	server = ips[0].String()
 	slog.Debug("Network time server", "server", server)
 	prepoch := time.Now().UnixMilli()
-	ntime, err := ntp.Time(server)
+
+	// Query NTP with timeout
+	options := ntp.QueryOptions{Timeout: timeout}
+	response, err := ntp.QueryWithOptions(server, options)
 	if err != nil {
-		slog.Error("Failed to get time", "error", err)
+		slog.Error("Failed to query NTP server", "error", err)
 		if syslog != nil {
-			syslog.Err(fmt.Sprintf("Failed to get time: %v", err))
+			syslog.Err(fmt.Sprintf("Failed to query NTP server: %v", err))
 		}
 		return err
 	}
+	ntime := time.Now().Add(response.ClockOffset)
 	nyear := ntime.Year()
 	if nyear < 2025 {
 		slog.Error("Year is less than 2025", "year", nyear)
