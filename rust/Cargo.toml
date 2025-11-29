@@ -8,6 +8,7 @@ description = "Minimal SNTP client for time synchronization"
 
 [dependencies]
 libc = "0.2"
+syslog = "7.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [profile.release]

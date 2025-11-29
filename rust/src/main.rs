@@ -16,6 +16,7 @@ use std::net::{ToSocketAddrs, UdpSocket};
 use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use chrono::{Datelike, Local, TimeZone};
+use syslog::{Facility, Formatter3164};
 
 const NTP_PORT: u16 = 123;
 const NTP_PACKET_SIZE: usize = 48;
@@ -31,6 +32,7 @@ struct Config {
     verbose: bool,
     test_only: bool,
     use_syslog: bool,
+    syslog_writer: Option<Box<syslog::Logger<syslog::LoggerBackend, syslog::Formatter3164>>>,
 }
 
 impl Default for Config {
@@ -42,6 +44,7 @@ impl Default for Config {
             verbose: false,
             test_only: false,
             use_syslog: false,
+            syslog_writer: None,
         }
     }
 }
@@ -82,10 +85,10 @@ fn ntp_ts_to_unix_ms(buf: &[u8]) -> Option<i64> {
     Some((unix_sec * 1000 + usec / 1000) as i64)
 }
 
-fn system_time_to_ms(time: SystemTime) -> i64 {
+fn system_time_to_ms(time: SystemTime) -> Option<i64> {
     match time.duration_since(UNIX_EPOCH) {
-        Ok(duration) => duration.as_millis() as i64,
-        Err(_) => 0,
+        Ok(duration) => Some(duration.as_millis() as i64),
+        Err(_) => None,
     }
 }
 
@@ -158,10 +161,19 @@ fn do_ntp_query(server: &str, timeout_ms: u64) -> Result<NtpResponse, String> {
             }
         };
         
+        let local_before_ms = match system_time_to_ms(before) {
+            Some(ms) => ms,
+            None => continue,
+        };
+        let local_after_ms = match system_time_to_ms(after) {
+            Some(ms) => ms,
+            None => continue,
+        };
+        
         return Ok(NtpResponse {
-            local_before_ms: system_time_to_ms(before),
+            local_before_ms,
             remote_ms,
-            local_after_ms: system_time_to_ms(after),
+            local_after_ms,
             server_addr: peer.ip().to_string(),
         });
     }
@@ -251,6 +263,25 @@ fn main() {
         config.use_syslog = false;
     }
     
+    if config.use_syslog {
+        let formatter = Formatter3164 {
+            facility: Facility::LOG_USER,
+            hostname: None,
+            process: "ntp_client".into(),
+            pid: std::process::id(),
+        };
+        
+        match syslog::unix(formatter) {
+            Ok(writer) => {
+                config.syslog_writer = Some(Box::new(writer));
+            }
+            Err(e) => {
+                stderr_log(&format!("WARNING Failed to initialize syslog: {}", e));
+                config.use_syslog = false;
+            }
+        }
+    }
+    
     if config.verbose {
         stderr_log(&format!("DEBUG Using server: {}", config.server));
         stderr_log(&format!(
@@ -290,60 +321,101 @@ fn main() {
             "ERROR Failed to contact NTP server {} after {} attempts",
             config.server, config.retries
         ));
+        if let Some(ref mut writer) = config.syslog_writer {
+            let _ = writer.err(format!(
+                "NTP query failed for {} after {} attempts",
+                config.server, config.retries
+            ));
+        }
         process::exit(2);
     }
     
     let resp = response.unwrap();
-    let avg_local_ms = (resp.local_before_ms + resp.local_after_ms) / 2;
-    let epoch_diff_ms = resp.remote_ms - avg_local_ms;
+    
+    // Check for overflow in avg calculation
+    let avg_local_ms = match resp.local_before_ms.checked_add(resp.local_after_ms) {
+        Some(sum) => sum / 2,
+        None => {
+            stderr_log("ERROR Time averaging would overflow, invalid timestamps.");
+            if let Some(ref mut writer) = config.syslog_writer {
+                let _ = writer.err("Time averaging would overflow".to_string());
+            }
+            process::exit(1);
+        }
+    };
+    
+    let offset_ms = resp.remote_ms - avg_local_ms;
     let roundtrip_ms = resp.local_after_ms - resp.local_before_ms;
     
     if config.verbose {
-        let local_dt = Local.timestamp_millis_opt(resp.local_after_ms).unwrap();
-        let remote_dt = Local.timestamp_millis_opt(resp.remote_ms).unwrap();
-        
         stderr_log(&format!("DEBUG Server: {} ({})", config.server, resp.server_addr));
-        stderr_log(&format!(
-            "DEBUG Local time: {}.{:03}",
-            local_dt.format("%Y-%m-%dT%H:%M:%S%z"),
-            resp.local_after_ms % 1000
-        ));
-        stderr_log(&format!(
-            "DEBUG Remote time: {}.{:03}",
-            remote_dt.format("%Y-%m-%dT%H:%M:%S%z"),
-            resp.remote_ms % 1000
-        ));
+        
+        // Format local time (non-fatal if fails, like C version)
+        let local_time_str = match Local.timestamp_millis_opt(resp.local_after_ms) {
+            chrono::LocalResult::Single(dt) => format!("{}.{:03}", dt.format("%Y-%m-%dT%H:%M:%S%z"), resp.local_after_ms % 1000),
+            _ => "TIME_FORMAT_ERROR".to_string(),
+        };
+        stderr_log(&format!("DEBUG Local time: {}", local_time_str));
+        
+        // Format remote time (non-fatal if fails)
+        let remote_time_str = match Local.timestamp_millis_opt(resp.remote_ms) {
+            chrono::LocalResult::Single(dt) => format!("{}.{:03}", dt.format("%Y-%m-%dT%H:%M:%S%z"), resp.remote_ms % 1000),
+            _ => "TIME_FORMAT_ERROR".to_string(),
+        };
+        stderr_log(&format!("DEBUG Remote time: {}", remote_time_str));
         stderr_log(&format!("DEBUG Local before(ms): {}", resp.local_before_ms));
         stderr_log(&format!("DEBUG Local after(ms): {}", resp.local_after_ms));
         stderr_log(&format!("DEBUG Estimated roundtrip(ms): {}", roundtrip_ms));
-        stderr_log(&format!("DEBUG Estimated offset remote - local(ms): {}", epoch_diff_ms));
+        stderr_log(&format!("DEBUG Estimated offset remote - local(ms): {}", offset_ms));
+        
+        if let Some(ref mut writer) = config.syslog_writer {
+            let _ = writer.info(format!(
+                "NTP server={} addr={} offset_ms={} rtt_ms={}",
+                config.server, resp.server_addr, offset_ms, roundtrip_ms
+            ));
+        }
     }
     
     // Sanity check for roundtrip time
     if roundtrip_ms < 0 || roundtrip_ms > 10000 {
         stderr_log(&format!("ERROR Invalid roundtrip time: {} ms", roundtrip_ms));
+        if let Some(ref mut writer) = config.syslog_writer {
+            let _ = writer.err(format!("Invalid suspiciously long roundtrip time: {} ms", roundtrip_ms));
+        }
         process::exit(1);
     }
     
     // Check if adjustment is needed
-    if epoch_diff_ms.abs() > 0 && epoch_diff_ms.abs() < 500 {
+    if offset_ms.abs() > 0 && offset_ms.abs() < 500 {
         if config.verbose {
             stderr_log("INFO Delta < 500ms, not setting system time.");
+            if let Some(ref mut writer) = config.syslog_writer {
+                let _ = writer.info("Delta < 500ms, not setting system time".to_string());
+            }
         }
         process::exit(0);
     }
     
     // Check remote year
-    let remote_year = Local
-        .timestamp_millis_opt(resp.remote_ms)
-        .unwrap()
-        .year();
+    let remote_year = match Local.timestamp_millis_opt(resp.remote_ms) {
+        chrono::LocalResult::Single(dt) => dt.year(),
+        _ => {
+            stderr_log("ERROR Could not parse remote time, not adjusting system time.");
+            if let Some(ref mut writer) = config.syslog_writer {
+                let _ = writer.err("Could not parse remote time, not adjusting system time".to_string());
+            }
+            process::exit(1);
+        }
+    };
     
     if remote_year < 2025 || remote_year > 2200 {
         stderr_log(&format!(
             "ERROR Remote year is {}, not adjusting system time.",
             remote_year
         ));
+        if let Some(ref mut writer) = config.syslog_writer {
+            let _ = writer.err("Remote year < 2025, not adjusting system time".to_string());
+        }
         process::exit(1);
     }
     
@@ -357,26 +429,53 @@ fn main() {
         unsafe {
             if libc::getuid() != 0 {
                 stderr_log("WARNING Not root, not setting system time.");
+                if let Some(ref mut writer) = config.syslog_writer {
+                    let _ = writer.warning("Not root, not setting system time".to_string());
+                }
                 process::exit(0);
             }
         }
     }
     
-    let new_time_ms = resp.remote_ms + roundtrip_ms / 2;
+    // Check for overflow before time calculation
+    let half_rtt = roundtrip_ms / 2;
+    let new_time_ms = match resp.remote_ms.checked_add(half_rtt) {
+        Some(time) => time,
+        None => {
+            stderr_log("ERROR Time calculation would overflow, not adjusting system time.");
+            if let Some(ref mut writer) = config.syslog_writer {
+                let _ = writer.err("Time calculation would overflow".to_string());
+            }
+            process::exit(1);
+        }
+    };
     
     match set_system_time(new_time_ms) {
         Ok(_) => {
-            let remote_dt = Local.timestamp_millis_opt(resp.remote_ms).unwrap();
-            stderr_log(&format!(
-                "INFO System time set using settimeofday ({}.{:03})",
+            let remote_dt = match Local.timestamp_millis_opt(resp.remote_ms) {
+                chrono::LocalResult::Single(dt) => dt,
+                _ => {
+                    stderr_log("ERROR Could not format time for logging");
+                    process::exit(1);
+                }
+            };
+            let time_str = format!(
+                "{}.{:03}",
                 remote_dt.format("%Y-%m-%dT%H:%M:%S%z"),
                 resp.remote_ms % 1000
-            ));
+            );
+            stderr_log(&format!("INFO System time set using settimeofday ({})", time_str));
+            if let Some(ref mut writer) = config.syslog_writer {
+                let _ = writer.info(format!("System time set using settimeofday ({})", time_str));
+            }
             process::exit(0);
         }
         Err(e) => {
             stderr_log(&format!("ERROR Failed to adjust system time: {}", e));
-            process::exit(1);
+            if let Some(ref mut writer) = config.syslog_writer {
+                let _ = writer.err(format!("Failed to adjust system time: {}", e));
+            }
+            process::exit(10);
         }
     }
 }
