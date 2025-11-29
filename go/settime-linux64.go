@@ -21,7 +21,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//go:build linux && ( amd64 || riscv64 || arm64 )
+//go:build linux && (amd64 || riscv64 || arm64)
 
 package main
 
