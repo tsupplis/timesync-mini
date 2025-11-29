@@ -11,5 +11,9 @@ timesync: timesync.o
 	$(CC) $(LDFLAGS) timesync.o -o timesync $(LDFLAGS)
 	$(STRIP) timesync
 
+timesync_sched: timesync_sched.o
+	$(CC) $(LDFLAGS) timesync_sched.o -o timesync_sched $(LDFLAGS)
+	$(STRIP) timesync_sched
+
 clean:
-	$(RM) timesync *.o
+	$(RM) timesync timesync_sched *.o

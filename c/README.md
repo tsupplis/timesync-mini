@@ -34,6 +34,9 @@ make LDFLAGS=-lsocket
 ```
 
 **Haiku:**
+```bash
+make LDFLAGS=-lnetwork
+```
 The build system automatically uses `timesync_haiku.c` on Haiku systems.
 
 ### Manual build
@@ -47,6 +50,11 @@ To use `settimeofday` instead, omit the `-DUSE_CLOCK_SETTIME` flag.
 On Solaris/Illumos:
 ```bash
 cc -Os -Wall -Wextra -DUSE_CLOCK_SETTIME -o timesync timesync.c -lsocket -lnsl
+```
+
+On Haiku:
+```bash
+cc -Os -Wall -Wextra -DUSE_CLOCK_SETTIME -o timesync timesync.c -lnetwork
 ```
 
 ## Usage

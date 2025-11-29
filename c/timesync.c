@@ -26,7 +26,8 @@
  * offset is > 500ms.
  *
  * Build:
- *   gcc -std=c11 -O2 -Wall -o timesync timesync.c (-socket -lnsl for Solaris)
+ *   gcc -std=c11 -O2 -Wall -o timesync timesync.c
+ *   (add -lsocket -lnsl for Solaris, -lnetwork for Haiku)
  *
  *
  * Usage:
@@ -35,8 +36,8 @@
  *
  * Notes:
  * - No external libraries required (uses BSD sockets).
- * - Works on Linux/macOS/Solaris/BSD. Requires linking to standard C library
- * only (with exception of solaris where -lsocket -lnsl may be needed).
+ * - Works on Linux/macOS/Solaris/BSD/Haiku. Requires linking to standard C
+ * library only (except Solaris: -lsocket -lnsl, Haiku: -lnetwork).
  */
 
 #include <arpa/inet.h>
