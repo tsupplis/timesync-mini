@@ -181,8 +181,27 @@ fn do_ntp_query(server: &str, timeout_ms: u64) -> Result<NtpResponse, String> {
     Err(format!("Failed to query {}", server))
 }
 
-fn set_system_time(time_ms: i64) -> Result<(), String> {
-    #[cfg(unix)]
+fn set_system_time(time_ms: i64) -> Result<((), &'static str), String> {
+    #[cfg(all(unix, not(feature = "use_settimeofday")))]
+    {
+        let secs = time_ms / 1000;
+        let nsecs = (time_ms % 1000) * 1_000_000;
+        
+        let ts = libc::timespec {
+            tv_sec: secs as libc::time_t,
+            tv_nsec: nsecs as libc::c_long,
+        };
+        
+        unsafe {
+            if libc::clock_settime(libc::CLOCK_REALTIME, &ts) == 0 {
+                Ok(((), "clock_settime"))
+            } else {
+                Err(format!("clock_settime failed: {}", std::io::Error::last_os_error()))
+            }
+        }
+    }
+    
+    #[cfg(all(unix, feature = "use_settimeofday"))]
     {
         let secs = time_ms / 1000;
         let usecs = (time_ms % 1000) * 1000;
@@ -200,7 +219,7 @@ fn set_system_time(time_ms: i64) -> Result<(), String> {
         
         unsafe {
             if libc::settimeofday(&tv as *const Timeval as *const libc::timeval, std::ptr::null()) == 0 {
-                Ok(())
+                Ok(((), "settimeofday"))
             } else {
                 Err(format!("settimeofday failed: {}", std::io::Error::last_os_error()))
             }
@@ -451,7 +470,7 @@ fn main() {
     };
     
     match set_system_time(new_time_ms) {
-        Ok(_) => {
+        Ok((_, api)) => {
             let remote_dt = match Local.timestamp_millis_opt(resp.remote_ms) {
                 chrono::LocalResult::Single(dt) => dt,
                 _ => {
@@ -464,9 +483,9 @@ fn main() {
                 remote_dt.format("%Y-%m-%dT%H:%M:%S%z"),
                 resp.remote_ms % 1000
             );
-            stderr_log(&format!("INFO System time set using settimeofday ({})", time_str));
+            stderr_log(&format!("INFO System time set using {} ({})", api, time_str));
             if let Some(ref mut writer) = config.syslog_writer {
-                let _ = writer.info(format!("System time set using settimeofday ({})", time_str));
+                let _ = writer.info(format!("System time set using {} ({})", api, time_str));
             }
             process::exit(0);
         }

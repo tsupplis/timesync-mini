@@ -11,6 +11,10 @@ libc = "0.2"
 syslog = "7.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
+[features]
+# Use settimeofday instead of clock_settime (default is clock_settime)
+use_settimeofday = []
+
 [profile.release]
 opt-level = "z"
 lto = true

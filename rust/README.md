@@ -24,6 +24,12 @@ cargo build --release
 
 The binary will be at `target/release/timesync`.
 
+By default, uses `clock_settime` for setting system time. To use `settimeofday` instead:
+
+```bash
+cargo build --release --features use_settimeofday
+```
+
 ### Using Make
 
 ```bash
@@ -57,7 +63,7 @@ make clean      # Clean build artifacts
 - `-r retries` : Number of retries (default: 3, max: 10)
 - `-n` : Test mode - do not set system time
 - `-v` : Verbose output
-- `-s` : Enable syslog logging (placeholder for future implementation)
+- `-s` : Enable syslog logging
 - `-h` : Show help message
 
 ## Installation
@@ -90,10 +96,12 @@ The program will only set the system time if:
 ## Differences from C Version
 
 - Uses Rust's type safety and memory safety features
-- Minimal `unsafe` code (only for `settimeofday` and `getuid` system calls)
+- Minimal `unsafe` code (only for `clock_settime`/`settimeofday` and `getuid` system calls)
 - Uses `chrono` crate for datetime formatting
+- Uses `syslog` crate for syslog support
 - Error handling with Result types
 - More idiomatic Rust patterns while maintaining C version's logic
+- Supports both `clock_settime` (default) and `settimeofday` via feature flag
 
 ## Supported Platforms
 
@@ -102,12 +110,13 @@ The program will only set the system time if:
 - FreeBSD
 - NetBSD
 - OpenBSD
-- Other Unix-like systems with `settimeofday` support
+- Other Unix-like systems with `clock_settime`/`settimeofday` support
 
 ## Dependencies
 
 - `libc` 0.2 - For Unix system calls
 - `chrono` 0.4 - For datetime handling and formatting
+- `syslog` 7.0 - For syslog support
 
 ## License
 
