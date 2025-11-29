@@ -450,11 +450,11 @@ fn main() {
     
     if remote_year < 2025 || remote_year > 2200 {
         stderr_log(&format!(
-            "ERROR Remote year is {}, not adjusting system time.",
+            "ERROR Remote year is out of valid range (2025-2200): {}",
             remote_year
         ));
         if let Some(ref mut writer) = config.syslog_writer {
-            let _ = writer.err("Remote year < 2025, not adjusting system time".to_string());
+            let _ = writer.err(format!("Remote year is out of valid range (2025-2200): {}", remote_year));
         }
         process::exit(1);
     }
