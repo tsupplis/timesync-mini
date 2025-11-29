@@ -129,7 +129,7 @@ static int do_ntp_query(const char *server, int timeout_ms,
         tv.tv_sec = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
         if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
-            stderr_log("WARNING setsockopt SO_RCVTIMEO failed");
+            stderr_log("WARNING setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
             close(sock);
             sock = -1;
             continue;
@@ -267,13 +267,13 @@ typedef struct _config_t {
 } config_t;
 
 /**
- * Main function algorithm (synopsis):
- * 1. Initialize network and time synchronization parameters.
- * 2. Start listening for incoming time sync requests.
- * 3. Upon receiving a request, process and respond with current time data.
- * 4. Periodically send time synchronization messages to peers.
- * 5. Update local time based on received synchronization data.
- * 6. Handle errors and clean up resources before exiting.
+ * Main function:
+ * 1. Parse command-line options and initialize configuration.
+ * 2. Query NTP server with retry logic and timeout handling.
+ * 3. Calculate clock offset and network delay from timestamps.
+ * 4. Validate response (sanity checks on time values and roundtrip).
+ * 5. Adjust system clock if running as root and offset exceeds threshold.
+ * 6. Log results to stderr and optionally to syslog.
  */
 int main(int argc, char **argv) {
     config_t config = {0};
@@ -382,7 +382,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     int64_t avg_local_ms = (local_before_ms + local_after_ms) / 2;
-    int64_t epoch_diff_ms = remote_ms - avg_local_ms;
+    int64_t offset_ms = remote_ms - avg_local_ms;
     int64_t roundtrip_ms = local_after_ms - local_before_ms;
     time_t now = local_before_ms / 1000;
     struct tm local_tm;
@@ -414,7 +414,7 @@ int main(int argc, char **argv) {
     if (config.verbose) {
         stderr_log("DEBUG Server: %s (%s)", config.server, server_addr);
         stderr_log("DEBUG Local time: %s.%03lld", local_time_str,
-                   (long long)(local_after_ms %1000));
+                   (long long)(local_after_ms % 1000));
         stderr_log("DEBUG Remote time: %s.%03lld", remote_time_str,
                    (long long)(remote_ms % 1000));
         stderr_log("DEBUG Local before(ms): %lld", (long long)local_before_ms);
@@ -422,10 +422,10 @@ int main(int argc, char **argv) {
         stderr_log("DEBUG Estimated roundtrip(ms): %lld",
                    (long long)roundtrip_ms);
         stderr_log("DEBUG Estimated offset remote - local(ms): %lld",
-                   (long long)epoch_diff_ms);
+                   (long long)offset_ms);
         if (config.use_syslog) {
             syslog(LOG_INFO, "NTP server=%s addr=%s offset_ms=%lld rtt_ms=%lld",
-                   config.server, server_addr, (long long)epoch_diff_ms,
+                   config.server, server_addr, (long long)offset_ms,
                    (long long)roundtrip_ms);
         }
     }
@@ -442,7 +442,7 @@ int main(int argc, char **argv) {
     }
 
     /* Set system time if conditions are met */
-    if (llabs(epoch_diff_ms) > 0 && llabs(epoch_diff_ms) < 500) {
+    if (llabs(offset_ms) > 0 && llabs(offset_ms) < 500) {
         if (config.verbose) {
             stderr_log("INFO Delta < 500ms, not setting system time.");
             if (config.use_syslog) {
@@ -472,7 +472,8 @@ int main(int argc, char **argv) {
     }
 
     /* Check for potential overflow before time calculation */
-    if (remote_ms > INT64_MAX - roundtrip_ms) {
+    int64_t half_rtt = roundtrip_ms / 2;
+    if (remote_ms > INT64_MAX - half_rtt) {
         stderr_log("ERROR Time calculation would overflow, not adjusting system time.");
         if (config.use_syslog) {
             syslog(LOG_ERR, "Time calculation would overflow");
@@ -480,7 +481,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int64_t new_time_ms = remote_ms + roundtrip_ms;
+    int64_t new_time_ms = remote_ms + half_rtt;
 
 #if defined(USE_CLOCK_SETTIME)
     const char *api = "clock_settime";
@@ -503,12 +504,13 @@ int main(int argc, char **argv) {
                    remote_time_str, (long long)(remote_ms % 1000));
         }
         return 0;
+    } else {
+        stderr_log("ERROR Failed to adjust system time with %s: %s", api,
+                   strerror(errno));
+        if (config.use_syslog) {
+            syslog(LOG_ERR, "Failed to adjust system time with %s: %s", api,
+                   strerror(errno));
+        }
+        return 10;
     }
-    stderr_log("ERROR Failed to adjust system time with %s: %s", api,
-               strerror(errno));
-    if (config.use_syslog) {
-        syslog(LOG_ERR, "Failed to adjust system time with %s: %s", api,
-               strerror(errno));
-    }
-    return 0;
 }
