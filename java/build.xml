@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="timesync" default="build" basedir=".">
+    <description>
+        TimeSync - Simple SNTP client in Java
+    </description>
+
+    <!-- Properties -->
+    <property name="src.dir" location="."/>
+    <property name="build.dir" location="build"/>
+    <property name="classes.dir" location="${build.dir}/classes"/>
+    <property name="jar.name" value="timesync.jar"/>
+    <property name="main.class" value="TimeSync"/>
+    <property name="wrapper.script" value="timesync"/>
+
+    <!-- Targets -->
+    <target name="init" description="Create build directories">
+        <mkdir dir="${build.dir}"/>
+        <mkdir dir="${classes.dir}"/>
+    </target>
+
+    <target name="compile" depends="init" description="Compile Java source">
+        <javac srcdir="${src.dir}" 
+               destdir="${classes.dir}"
+               includeantruntime="false"
+               includes="TimeSync.java">
+            <compilerarg value="-Xlint:unchecked"/>
+        </javac>
+    </target>
+
+    <target name="jar" depends="compile" description="Create JAR file">
+        <jar destfile="${jar.name}" basedir="${classes.dir}">
+            <manifest>
+                <attribute name="Main-Class" value="${main.class}"/>
+            </manifest>
+        </jar>
+    </target>
+
+    <target name="wrapper" depends="jar" description="Create wrapper script">
+        <echo file="${wrapper.script}">#!/bin/sh
+# Wrapper script for timesync Java JAR
+SCRIPT_DIR="$$(cd "$$(dirname "$$0")" &amp;&amp; pwd)"
+exec java -jar "$$SCRIPT_DIR/${jar.name}" "$$@"
+</echo>
+        <chmod file="${wrapper.script}" perm="755"/>
+    </target>
+
+    <target name="build" depends="wrapper" description="Build everything">
+        <echo message="Build complete: ${jar.name} and ${wrapper.script} created"/>
+    </target>
+
+    <target name="run" depends="jar" description="Run the application">
+        <java jar="${jar.name}" fork="true">
+            <arg line="${args}"/>
+        </java>
+    </target>
+
+    <target name="clean" description="Clean build artifacts">
+        <delete dir="${build.dir}"/>
+        <delete file="${jar.name}"/>
+        <delete file="${wrapper.script}"/>
+        <delete>
+            <fileset dir="${src.dir}" includes="*.class"/>
+        </delete>
+    </target>
+
+    <target name="rebuild" depends="clean,build" description="Clean and build"/>
+
+</project>

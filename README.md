@@ -9,9 +9,10 @@
 ![Perl](https://img.shields.io/badge/Perl-39457E?style=flat&logo=perl&logoColor=white)
 ![Erlang](https://img.shields.io/badge/Erlang-A90533?style=flat&logo=erlang&logoColor=white)
 ![Common Lisp](https://img.shields.io/badge/Common_Lisp-3498DB?style=flat&logo=lisp&logoColor=white)
+![Java](https://img.shields.io/badge/Java-ED8B00?style=flat&logo=openjdk&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in nine implementations across different programming languages:
+`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in ten implementations across different programming languages:
 
 - **C implementation** (`c/`): Minimal dependencies, uses only standard C library and BSD sockets, includes Haiku OS support
 - **Go implementation** (`go/`): Uses the beevik/ntp package for NTP queries
@@ -22,6 +23,7 @@
 - **Perl implementation** (`perl/`): Native socket programming with Time::HiRes
 - **Erlang implementation** (`erlang/`): OTP-style implementation with gen_udp
 - **SBCL implementation** (`sbcl/`): Common Lisp with sb-bsd-sockets, available as script or compiled binary
+- **Java implementation** (`java/`): Pure JDK implementation with DatagramSocket, packaged as JAR
 
 All implementations support the same command-line interface for consistency.
 
@@ -93,6 +95,7 @@ timesync -h
 | **Bash** | 283 | socat, xxd | N/A (script) | N/A | Manual (socat/UDP) |
 | **Perl** | 302 | Core modules | N/A (script) | Manual | Manual (native sockets) |
 | **Erlang** | 304 | kernel, stdlib | N/A (script) | Automatic (BEAM VM) | Manual (gen_udp) |
+| **Java** | 322 | JDK only | ~6 KB JAR | Automatic (GC) | Manual (DatagramSocket) |
 | **OCaml** | 368 | unix.cmxa | ~500 KB | Automatic (compile-time) | Manual |
 | **Python** | 416 | Standard library | N/A (script) | Automatic (GC) | Manual |
 | **Rust** | 521 | libc, chrono | ~500 KB - 1 MB | Automatic (compile-time) | Manual |
@@ -109,10 +112,11 @@ timesync -h
 - **Perl**: Unix-like systems with Perl 5
 - **Erlang**: Systems with Erlang/OTP runtime
 - **SBCL**: Systems with Steel Bank Common Lisp compiler/runtime
+- **Java**: Cross-platform (any system with JRE 8+)
 
 ### Build Systems
 
-- **C, Go, Rust, OCaml, Perl, Erlang, SBCL**: Makefile provided
+- **C, Go, Rust, OCaml, Perl, Erlang, SBCL, Java**: Makefile provided
 - **Python, Bash**: No build required (scripts)
 
 All implementations support the same command-line interface and behavior.
@@ -160,4 +164,9 @@ Each implementation directory contains its own README with specific build and us
 - Steel Bank Common Lisp (SBCL)
 - sb-bsd-sockets (included with SBCL)
 - Can run as script or compiled to native binary
+
+### Java Implementation
+- Java Development Kit (JDK) 8 or higher
+- No external dependencies (uses standard `java.net` and `java.nio`)
+- Packaged as executable JAR file
 

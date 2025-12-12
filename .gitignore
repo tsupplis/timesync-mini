@@ -99,3 +99,10 @@ erl_crash.dump
 *.lib
 *.x86f
 *.amd64f
+
+# Java
+*.class
+*.jar
+!lib/*.jar
+manifest.txt
+build/
