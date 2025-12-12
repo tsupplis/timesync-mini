@@ -71,3 +71,20 @@ go.sum
 timesync
 timesync-*
 local/**
+
+# OCaml
+*.cmi
+*.cmx
+*.cmo
+*.cma
+*.cmxa
+*.cmxs
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
