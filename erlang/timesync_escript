@@ -1,0 +1,4 @@
+#!/usr/bin/env escript
+%% Wrapper script for compiled timesync module
+main(Args) ->
+    timesync:main(Args).

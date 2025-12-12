@@ -88,3 +88,14 @@ __pycache__/
 .Python
 *.egg-info/
 .pytest_cache/
+
+# Erlang
+*.beam
+erl_crash.dump
+
+# SBCL/Common Lisp
+*.fasl
+*.fas
+*.lib
+*.x86f
+*.amd64f
