@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("timesync")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e87bb7db23aad36e46efa502ddb31922efbbf3e1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+aad10160e1f9094f635dc710711507044d2a794b")]
 [assembly: System.Reflection.AssemblyProductAttribute("timesync")]
 [assembly: System.Reflection.AssemblyTitleAttribute("timesync")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
