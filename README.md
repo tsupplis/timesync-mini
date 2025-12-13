@@ -13,9 +13,10 @@
 ![Swift](https://img.shields.io/badge/Swift-FA7343?style=flat&logo=swift&logoColor=white)
 ![Lua](https://img.shields.io/badge/Lua-2C2D72?style=flat&logo=lua&logoColor=white)
 ![Ruby](https://img.shields.io/badge/Ruby-CC342D?style=flat&logo=ruby&logoColor=white)
+![C#](https://img.shields.io/badge/C%23-239120?style=flat&logo=csharp&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in thirteen implementations across different programming languages, this is a fun little exercice to exercise code conversion with claude sonnet on a tiny program ...
+`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in fourteen implementations across different programming languages, this is a fun little exercice to exercise code conversion with claude sonnet on a tiny program ...
 
 - **C implementation** (`c/`): Minimal dependencies, uses only standard C library and BSD sockets, includes Haiku OS support with root privilege checking
 - **Go implementation** (`go/`): Uses the beevik/ntp package for NTP queries
@@ -30,12 +31,13 @@
 - **Ruby implementation** (`ruby/`): Object-oriented implementation with standard library, FFI via Fiddle for settimeofday, includes root checking
 - **Swift implementation** (`swift/`): Native Apple platform support with Foundation and BSD sockets, smallest compiled binary with root checking
 - **Lua implementation** (`lua/`): Lightweight scripting with LuaSocket, FFI support via LuaJIT or lua-posix for settimeofday, includes root checking
+- **C# implementation** (`csharp/`): .NET implementation with P/Invoke for native system calls, cross-platform via .NET runtime
 
 All implementations support the same command-line interface for consistency.
 
 ## Key Features
 
-- **Consistent CLI**: All 13 implementations support identical command-line flags and behavior
+- **Consistent CLI**: All 14 implementations support identical command-line flags and behavior
 - **Root Privilege Checking**: All implementations check if running as root before attempting to set system time (except Bash and Java which rely on OS checks)
 - **System Time Setting**: Each implementation can set system time when offset exceeds 500ms threshold:
   - **C, Rust, OCaml**: Direct `settimeofday()` system call
@@ -46,6 +48,7 @@ All implementations support the same command-line interface for consistency.
   - **Swift**: Direct `settimeofday()` via Darwin/Glibc
   - **Lua**: FFI via LuaJIT or lua-posix for `settimeofday()`
   - **Ruby**: FFI via Fiddle for `settimeofday()`, fallback to `date` command
+  - **C#**: P/Invoke to libc `settimeofday()` on Unix platforms
   - **Go, Java, Bash**: Platform-dependent approaches
 - **Dual-Mode Support**: SBCL and Swift can run as scripts or compiled binaries
 - **Memory Safety**: All implementations except C use automatic memory management (GC or compile-time)
@@ -112,7 +115,7 @@ timesync -h
 
 ## Implementation Comparison
 
-| Implementation | Lines of Code | Dependencies | Binary Size | Memory Safety | NTP Implementation | Time Setting Method |
+| Implementation | LOCs | Dependencies | Binary Size | Memory Safety | NTP Implementation | Time Setting Method |
 |---------------|---------------|--------------|-------------|---------------|-------------------|---------------------|
 | **Go** | 274 | beevik/ntp | ~2-3 MB | Automatic (GC) | Library-based | syscall.Settimeofday() |
 | **SBCL** | 275 | sb-bsd-sockets | ~13 MB (compressed) | Automatic (GC) | Manual | FFI settimeofday() |
@@ -125,6 +128,7 @@ timesync -h
 | **Swift** | 400 | Foundation | ~79 KB | Automatic (ARC) | Manual (BSD sockets) | settimeofday() syscall |
 | **Lua** | 415 | luasocket | 12 KB (script) | Automatic (GC) | Manual (LuaSocket UDP) | LuaJIT FFI / posix fallback |
 | **Python** | 416 | Standard library | 14 KB (script) | Automatic (GC) | Manual | ctypes clock_settime() |
+| **C#** | 437 | .NET Runtime | ~13 KB (DLL) | Automatic (GC) | Manual (UdpClient) | P/Invoke settimeofday() |
 | **Rust** | 521 | libc, chrono | ~500 KB - 1 MB | Automatic (compile-time) | Manual | libc::settimeofday() |
 | **C** | 539 | Standard C library | ~20-30 KB (stripped) | Manual | Manual | settimeofday() syscall |
 
@@ -143,9 +147,11 @@ timesync -h
 - **Ruby**: Unix-like systems with Ruby 2.5+
 - **Swift**: macOS, Linux (with Swift runtime)
 - **Lua**: Unix-like systems with Lua 5.1+ or LuaJIT
+- **C#**: Cross-platform (.NET 6+ or Mono 5.0+)
 ### Build Systems
 
-- **C, Go, Rust, OCaml, Perl, Erlang, SBCL, Java, Swift**: Makefile provided
+- **C, Go, Rust, OCaml, Perl, Erlang, SBCL, Swift, C#**: Makefile provided
+- **Java**: Apache Ant (build.xml) with automatic JNA dependency download
 - **Python, Bash, Lua, Ruby**: No build required (scripts)
 
 All implementations support the same command-line interface and behavior.
@@ -230,6 +236,14 @@ Each implementation directory contains its own README with specific build and us
 - Root privilege checking via `Process.uid`
 - Time setting via Fiddle FFI (primary) with `date` command fallback
 - Clean object-oriented design with Config, Logger, NTPClient, TimeSetter classes
+
+### C# Implementation
+- .NET SDK 6.0 or higher (or Mono 5.0+)
+- Standard library only (System.Net, System.Runtime.InteropServices)
+- P/Invoke for Unix system calls (`geteuid`, `settimeofday`)
+- Root privilege checking on Unix platforms via `geteuid() == 0`
+- Time setting via `settimeofday()` P/Invoke on Unix (not supported on Windows)
+- Requires .NET runtime for execution
 
 ## Security Considerations
 

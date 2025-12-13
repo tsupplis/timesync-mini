@@ -1,0 +1,15 @@
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/bin/Release/net10.0/timesync
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/bin/Release/net10.0/timesync.deps.json
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/bin/Release/net10.0/timesync.runtimeconfig.json
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/bin/Release/net10.0/timesync.dll
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/bin/Release/net10.0/timesync.pdb
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.GeneratedMSBuildEditorConfig.editorconfig
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.AssemblyInfoInputs.cache
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.AssemblyInfo.cs
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.csproj.CoreCompileInputs.cache
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.sourcelink.json
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.dll
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/refint/timesync.dll
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.pdb
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/timesync.genruntimeconfig.cache
+/Users/thierry/Projects/Deploy/timesync-mini/csharp/obj/Release/net10.0/ref/timesync.dll
