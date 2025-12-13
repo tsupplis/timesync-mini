@@ -298,7 +298,70 @@ validate_and_set_time(RemoteMs, Offset, Config) ->
                     end,
                     0;
                 false ->
-                    log_stderr("ERROR Time setting not implemented in Erlang (use C extension)", []),
-                    10
+                    %% Check if running as root using port
+                    case get_uid() of
+                        0 ->
+                            %% Running as root, try to set time
+                            case set_system_time(RemoteMs) of
+                                ok ->
+                                    case maps:get(verbose, Config) of
+                                        true -> log_stderr("INFO System time set (~B ms)", [RemoteMs]);
+                                        false -> ok
+                                    end,
+                                    0;
+                                {error, Reason} ->
+                                    log_stderr("ERROR Failed to adjust system time: ~p", [Reason]),
+                                    10
+                            end;
+                        _ ->
+                            %% Not running as root
+                            log_stderr("WARNING Not root, not setting system time.", []),
+                            10
+                    end
             end
+    end.
+
+%% Get current UID using a port
+get_uid() ->
+    try
+        Port = open_port({spawn, "id -u"}, [exit_status, binary]),
+        receive
+            {Port, {data, Data}} ->
+                UidStr = string:trim(binary_to_list(Data)),
+                list_to_integer(UidStr);
+            {Port, {exit_status, _}} ->
+                -1
+        after 1000 ->
+            -1
+        end
+    catch
+        _:_ -> -1
+    end.
+
+%% Set system time using a port to call date command
+set_system_time(RemoteMs) ->
+    try
+        %% Convert ms to seconds
+        Sec = RemoteMs div 1000,
+        
+        %% Try to use a helper script if it exists, otherwise use date command
+        %% Format: YYYY-MM-DD HH:MM:SS
+        UnixEpochSecs = calendar:datetime_to_gregorian_seconds({{1970,1,1},{0,0,0}}),
+        {{Y, M, D}, {H, Min, S}} = calendar:gregorian_seconds_to_datetime(UnixEpochSecs + Sec),
+        
+        %% Use date command (macOS/BSD format)
+        DateStr = io_lib:format("~4..0B~2..0B~2..0B~2..0B~2..0B.~2..0B", [Y, M, D, H, Min, S]),
+        Cmd = lists:flatten(io_lib:format("date ~s", [DateStr])),
+        
+        Port = open_port({spawn, Cmd}, [exit_status]),
+        receive
+            {Port, {exit_status, 0}} ->
+                ok;
+            {Port, {exit_status, Status}} ->
+                {error, {exit_status, Status}}
+        after 5000 ->
+            {error, timeout}
+        end
+    catch
+        _:Error -> {error, Error}
     end.

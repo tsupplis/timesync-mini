@@ -52,6 +52,20 @@ Minimal SNTP client implementation using Erlang/OTP.
 - Great error handling
 - Immutable data structures
 
+## Implementation Details
+
+### System Time Setting
+
+Since Erlang doesn't have direct access to C system calls without NIFs, the implementation uses ports to:
+1. Check if running as root using `id -u` command
+2. Set system time using the `date` command with the format `date YYYYMMDDhhmm.ss`
+
+This approach works on macOS and BSD systems. On Linux, you may need to use `sudo date` or the `date -s` command format.
+
+### Root Check
+
+The `get_uid()` function spawns a port running `id -u` and parses the output to determine if the effective UID is 0 (root).
+
 ## License
 
 MIT License - See LICENSE file for details
