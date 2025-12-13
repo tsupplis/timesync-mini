@@ -8,12 +8,27 @@
     <property name="src.dir" location="."/>
     <property name="build.dir" location="build"/>
     <property name="classes.dir" location="${build.dir}/classes"/>
+    <property name="lib.dir" location="lib"/>
     <property name="jar.name" value="timesync.jar"/>
     <property name="main.class" value="TimeSync"/>
     <property name="wrapper.script" value="timesync"/>
+    <property name="jna.version" value="5.14.0"/>
+    <property name="jna.jar" value="${lib.dir}/jna-${jna.version}.jar"/>
+    <property name="jna.url" value="https://repo1.maven.org/maven2/net/java/dev/jna/jna/${jna.version}/jna-${jna.version}.jar"/>
 
     <!-- Targets -->
-    <target name="init" description="Create build directories">
+    <target name="init-lib" description="Download JNA library if not present">
+        <mkdir dir="${lib.dir}"/>
+        <available file="${jna.jar}" property="jna.present"/>
+        <antcall target="download-jna"/>
+    </target>
+
+    <target name="download-jna" unless="jna.present" description="Download JNA from Maven Central">
+        <echo message="Downloading JNA ${jna.version} from Maven Central..."/>
+        <get src="${jna.url}" dest="${jna.jar}" verbose="true" usetimestamp="true"/>
+    </target>
+
+    <target name="init" depends="init-lib" description="Create build directories">
         <mkdir dir="${build.dir}"/>
         <mkdir dir="${classes.dir}"/>
     </target>
@@ -23,6 +38,9 @@
                destdir="${classes.dir}"
                includeantruntime="false"
                includes="TimeSync.java">
+            <classpath>
+                <pathelement location="${jna.jar}"/>
+            </classpath>
             <compilerarg value="-Xlint:unchecked"/>
         </javac>
     </target>
@@ -39,7 +57,7 @@
         <echo file="${wrapper.script}">#!/bin/sh
 # Wrapper script for timesync Java JAR
 SCRIPT_DIR="$$(cd "$$(dirname "$$0")" &amp;&amp; pwd)"
-exec java -jar "$$SCRIPT_DIR/${jar.name}" "$$@"
+exec java -cp "$$SCRIPT_DIR/${jar.name}:$$SCRIPT_DIR/lib/*" ${main.class} "$$@"
 </echo>
         <chmod file="${wrapper.script}" perm="755"/>
     </target>
@@ -49,13 +67,18 @@ exec java -jar "$$SCRIPT_DIR/${jar.name}" "$$@"
     </target>
 
     <target name="run" depends="jar" description="Run the application">
-        <java jar="${jar.name}" fork="true">
+        <java classname="${main.class}" fork="true">
+            <classpath>
+                <pathelement location="${jar.name}"/>
+                <pathelement location="${jna.jar}"/>
+            </classpath>
             <arg line="${args}"/>
         </java>
     </target>
 
     <target name="clean" description="Clean build artifacts">
         <delete dir="${build.dir}"/>
+        <delete dir="${lib.dir}"/>
         <delete file="${jar.name}"/>
         <delete file="${wrapper.script}"/>
         <delete>

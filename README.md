@@ -15,7 +15,7 @@
 ![Ruby](https://img.shields.io/badge/Ruby-CC342D?style=flat&logo=ruby&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in thirteen implementations across different programming languages:
+`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in thirteen implementations across different programming languages, this is a fun little exercice to exercise code conversion with claude sonnet on a tiny program ...
 
 - **C implementation** (`c/`): Minimal dependencies, uses only standard C library and BSD sockets, includes Haiku OS support with root privilege checking
 - **Go implementation** (`go/`): Uses the beevik/ntp package for NTP queries
@@ -26,7 +26,7 @@
 - **Perl implementation** (`perl/`): Native socket programming with Time::HiRes and settimeofday, includes root checking
 - **Erlang implementation** (`erlang/`): OTP-style implementation with gen_udp, uses ports for root checking and time setting via date command
 - **SBCL implementation** (`sbcl/`): Common Lisp with sb-bsd-sockets and FFI for settimeofday, available as script or compiled binary with root checking
-- **Java implementation** (`java/`): Pure JDK implementation with DatagramSocket, packaged as JAR
+- **Java implementation** (`java/`): JDK implementation with JNA for native system calls, packaged as JAR
 - **Ruby implementation** (`ruby/`): Object-oriented implementation with standard library, FFI via Fiddle for settimeofday, includes root checking
 - **Swift implementation** (`swift/`): Native Apple platform support with Foundation and BSD sockets, smallest compiled binary with root checking
 - **Lua implementation** (`lua/`): Lightweight scripting with LuaSocket, FFI support via LuaJIT or lua-posix for settimeofday, includes root checking
@@ -119,7 +119,7 @@ timesync -h
 | **Bash** | 283 | socat, xxd | 8.9 KB (script) | N/A | Manual (socat/UDP) | date command |
 | **Perl** | 302 | Core modules | 10 KB (script) | Manual | Manual (native sockets) | Time::HiRes::settimeofday() |
 | **Erlang** | 304 | kernel, stdlib | 16 KB (BEAM) | Automatic (BEAM VM) | Manual (gen_udp) | Port: date command |
-| **Java** | 322 | JDK only | ~6 KB JAR | Automatic (GC) | Manual (DatagramSocket) | Not implemented |
+| **Java** | 360 | JDK + JNA | ~1.8 MB (7 KB + 1.8 MB JNA) | Automatic (GC) | Manual (DatagramSocket) | JNA settimeofday() |
 | **OCaml** | 368 | unix.cmxa | ~500 KB | Automatic (compile-time) | Manual | Unix.settimeofday() |
 | **Ruby** | 386 | Standard library | 10 KB (script) | Automatic (GC) | Manual (native sockets) | Fiddle FFI / date fallback |
 | **Swift** | 400 | Foundation | ~79 KB | Automatic (ARC) | Manual (BSD sockets) | settimeofday() syscall |
@@ -189,6 +189,15 @@ Each implementation directory contains its own README with specific build and us
 - Erlang/OTP runtime
 - kernel and stdlib applications (gen_udp, inet)
 - Uses port-based approach for root checking (`id -u` command)
+
+### Java Implementation
+- Java Development Kit (JDK) 8 or higher
+- JNA (Java Native Access) library for native system calls
+- Root privilege checking via JNA `getuid()` FFI
+- System time setting via JNA `settimeofday()` FFI
+- Graceful degradation if JNA is not available
+- Packaged as executable JAR (~7 KB + JNA dependency)
+
 ### SBCL Implementation
 - Steel Bank Common Lisp (SBCL)
 - sb-bsd-sockets (included with SBCL)

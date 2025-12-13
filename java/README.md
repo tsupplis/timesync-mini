@@ -4,17 +4,22 @@ Simple SNTP client for synchronizing system time with NTP servers, implemented i
 
 ## Features
 
-- Pure JDK implementation (no external dependencies)
+- Uses JNA (Java Native Access) for system calls
+- Root privilege checking via `getuid()`
+- System time setting via `settimeofday()`
 - Uses `java.net.DatagramSocket` for UDP communication
 - `ByteBuffer` for efficient binary packet manipulation
 - Cross-platform (runs on any system with JRE 8+)
 - Packaged as executable JAR file
-- Tiny JAR size (~6 KB)
+- Small JAR size (~6 KB + JNA dependency)
 
 ## Requirements
 
 - Java Development Kit (JDK) 8 or higher
 - Apache Ant (for building)
+- JNA (Java Native Access) library for system calls
+  - Download `jna.jar` from [Maven Central](https://repo1.maven.org/maven2/net/java/dev/jna/jna/)
+  - Or use version bundled with Java 9+ (may be limited)
 
 ## Building
 
@@ -78,12 +83,14 @@ ant rebuild
 
 ## Implementation Details
 
-- **Lines of Code**: 322
-- **JAR Size**: ~6 KB (only contains compiled classes)
+- **Lines of Code**: ~360
+- **JAR Size**: ~7 KB (only contains compiled classes)
+- **Dependencies**: JNA library (~1.5 MB jna.jar)
 - **Runtime Memory**: ~50-100 MB (typical JVM overhead)
 - **NTP Implementation**: Manual packet construction using ByteBuffer
 - **Socket Type**: DatagramSocket with timeout support
 - **Time Resolution**: Milliseconds
+- **System Calls**: JNA FFI to `getuid()` and `settimeofday()`
 
 ## Notes
 

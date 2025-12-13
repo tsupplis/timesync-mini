@@ -34,7 +34,33 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
+import com.sun.jna.Library;
+import com.sun.jna.Native;
+import com.sun.jna.Structure;
+import com.sun.jna.Pointer;
+
 public class TimeSync {
+    // JNA interface to C library functions
+    public interface CLibrary extends Library {
+        CLibrary INSTANCE = Native.load("c", CLibrary.class);
+        
+        int getuid();
+        int settimeofday(Timeval tv, Pointer tz);
+    }
+    
+    @Structure.FieldOrder({"tv_sec", "tv_usec"})
+    public static class Timeval extends Structure {
+        public long tv_sec;
+        public long tv_usec;
+        
+        public Timeval() {}
+        
+        public Timeval(long tv_sec, long tv_usec) {
+            this.tv_sec = tv_sec;
+            this.tv_usec = tv_usec;
+        }
+    }
+    
     private static final int NTP_PORT = 123;
     private static final int NTP_PACKET_SIZE = 48;
     private static final long NTP_UNIX_EPOCH = 2208988800L;
@@ -84,6 +110,31 @@ public class TimeSync {
 
     private static int clamp(int val, int min, int max) {
         return Math.max(min, Math.min(max, val));
+    }
+    
+    private static boolean isRoot() {
+        try {
+            return CLibrary.INSTANCE.getuid() == 0;
+        } catch (UnsatisfiedLinkError e) {
+            // JNA not available, assume not root
+            return false;
+        }
+    }
+    
+    private static boolean setSystemTime(long remoteMs) {
+        try {
+            long sec = remoteMs / 1000;
+            long usec = (remoteMs % 1000) * 1000;
+            
+            Timeval tv = new Timeval(sec, usec);
+            int result = CLibrary.INSTANCE.settimeofday(tv, null);
+            
+            return result == 0;
+        } catch (UnsatisfiedLinkError e) {
+            // JNA not available
+            logStderr("ERROR JNA library not available for time setting");
+            return false;
+        }
     }
 
     private static Config parseArgs(String[] args) {
@@ -251,8 +302,22 @@ public class TimeSync {
             return 0;
         }
 
-        logStderr("ERROR Time setting not implemented in Java (use C extension)");
-        return 10;
+        // Check root privileges
+        if (!isRoot()) {
+            logStderr("ERROR Must run as root to set system time");
+            return 3;
+        }
+
+        // Set system time
+        if (setSystemTime(remoteMs)) {
+            if (config.verbose) {
+                logStderr("INFO System time adjusted by %d ms", offset);
+            }
+            return 0;
+        } else {
+            logStderr("ERROR Failed to set system time");
+            return 10;
+        }
     }
 
     private static int doNtpAttempt(Config config, int attempt) {
