@@ -106,3 +106,10 @@ erl_crash.dump
 !lib/*.jar
 manifest.txt
 build/
+
+# Swift
+*.swiftmodule
+*.swiftdoc
+.build/
+*.xcodeproj/
+*.xcworkspace/
