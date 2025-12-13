@@ -13,27 +13,30 @@ A portable SNTP client written in Lua with LuaSocket for network operations.
 
 ## Requirements
 
-- Lua 5.1 or higher
+- Lua 5.1 or higher (or LuaJIT for better performance)
 - LuaSocket library (`luasocket` package)
-- Optional: lua-posix for better root detection
+- Optional: LuaJIT (for FFI-based `settimeofday()`) or lua-posix
 
 ### Installing Dependencies
 
 **macOS (Homebrew):**
 ```bash
-brew install lua luarocks
+brew install luajit luarocks  # LuaJIT recommended for FFI support
+# or: brew install lua luarocks
 luarocks install luasocket
-luarocks install luaposix  # optional
+luarocks install luaposix  # optional, fallback if no LuaJIT
 ```
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt-get install lua5.3 lua-socket lua-posix
+sudo apt-get install luajit lua-socket lua-posix
+# or: sudo apt-get install lua5.3 lua-socket lua-posix
 ```
 
 **Fedora/RHEL:**
 ```bash
-sudo dnf install lua lua-socket lua-posix
+sudo dnf install luajit lua-socket lua-posix
+# or: sudo dnf install lua lua-socket lua-posix
 ```
 
 **Via LuaRocks (all platforms):**
@@ -66,10 +69,17 @@ lua timesync.lua -nv 192.168.1.1  # explicit lua interpreter
 ## Implementation Details
 
 - **Networking**: LuaSocket UDP for cross-platform network operations
-- **Root checking**: lua-posix `geteuid()` if available, falls back to `id -u` command
-- **Time setting**: Uses `date` command (format: `YYYYMMDDhhmm.ss`)
+- **Root checking**: 
+  - Primary: LuaJIT FFI `geteuid()` (fastest)
+  - Fallback 1: lua-posix `geteuid()`
+  - Fallback 2: `id -u` command
+- **Time setting**: 
+  - Primary: LuaJIT FFI `settimeofday()` (direct system call)
+  - Fallback: lua-posix `settimeofday()`
+  - No `date` command fallback (requires FFI support)
 - **Script size**: ~12 KB
 - **Memory**: Very lightweight, ~2-3 MB resident (Lua interpreter + libraries)
+- **Best with**: LuaJIT for optimal FFI performance
 
 ## Platform Support
 
@@ -82,6 +92,8 @@ Works on:
 ## Notes
 
 - Requires LuaSocket installed (not in standard Lua distribution)
+- **LuaJIT recommended** for FFI-based `settimeofday()` support
+- lua-posix can be used as alternative to LuaJIT FFI
 - Root privileges required to actually set system time
 - Test mode (`-n`) bypasses root requirement
-- Falls back to shell command for root checking if lua-posix unavailable
+- Without FFI support (LuaJIT or lua-posix), time setting will fail with error message

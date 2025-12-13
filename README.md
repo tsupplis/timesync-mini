@@ -11,9 +11,11 @@
 ![Common Lisp](https://img.shields.io/badge/Common_Lisp-3498DB?style=flat&logo=lisp&logoColor=white)
 ![Java](https://img.shields.io/badge/Java-ED8B00?style=flat&logo=openjdk&logoColor=white)
 ![Swift](https://img.shields.io/badge/Swift-FA7343?style=flat&logo=swift&logoColor=white)
+![Lua](https://img.shields.io/badge/Lua-2C2D72?style=flat&logo=lua&logoColor=white)
+![Ruby](https://img.shields.io/badge/Ruby-CC342D?style=flat&logo=ruby&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in eleven implementations across different programming languages:
+`timesync-mini` is a simple command-line tool for synchronizing system time with NTP servers. It is available in thirteen implementations across different programming languages:
 
 - **C implementation** (`c/`): Minimal dependencies, uses only standard C library and BSD sockets, includes Haiku OS support with root privilege checking
 - **Go implementation** (`go/`): Uses the beevik/ntp package for NTP queries
@@ -25,13 +27,15 @@
 - **Erlang implementation** (`erlang/`): OTP-style implementation with gen_udp, uses ports for root checking and time setting via date command
 - **SBCL implementation** (`sbcl/`): Common Lisp with sb-bsd-sockets and FFI for settimeofday, available as script or compiled binary with root checking
 - **Java implementation** (`java/`): Pure JDK implementation with DatagramSocket, packaged as JAR
+- **Ruby implementation** (`ruby/`): Object-oriented implementation with standard library, FFI via Fiddle for settimeofday, includes root checking
 - **Swift implementation** (`swift/`): Native Apple platform support with Foundation and BSD sockets, smallest compiled binary with root checking
+- **Lua implementation** (`lua/`): Lightweight scripting with LuaSocket, FFI support via LuaJIT or lua-posix for settimeofday, includes root checking
 
 All implementations support the same command-line interface for consistency.
 
 ## Key Features
 
-- **Consistent CLI**: All 11 implementations support identical command-line flags and behavior
+- **Consistent CLI**: All 13 implementations support identical command-line flags and behavior
 - **Root Privilege Checking**: All implementations check if running as root before attempting to set system time (except Bash and Java which rely on OS checks)
 - **System Time Setting**: Each implementation can set system time when offset exceeds 500ms threshold:
   - **C, Rust, OCaml**: Direct `settimeofday()` system call
@@ -40,6 +44,8 @@ All implementations support the same command-line interface for consistency.
   - **SBCL**: FFI to `settimeofday()` via `sb-alien`
   - **Erlang**: Port-based approach using `date` command
   - **Swift**: Direct `settimeofday()` via Darwin/Glibc
+  - **Lua**: FFI via LuaJIT or lua-posix for `settimeofday()`
+  - **Ruby**: FFI via Fiddle for `settimeofday()`, fallback to `date` command
   - **Go, Java, Bash**: Platform-dependent approaches
 - **Dual-Mode Support**: SBCL and Swift can run as scripts or compiled binaries
 - **Memory Safety**: All implementations except C use automatic memory management (GC or compile-time)
@@ -106,19 +112,21 @@ timesync -h
 
 ## Implementation Comparison
 
-| Implementation | Lines of Code | Dependencies | Binary Size | Memory Safety | NTP Implementation |
-|---------------|---------------|--------------|-------------|---------------|-------------------|
-| **Go** | 274 | beevik/ntp | ~2-3 MB | Automatic (GC) | Library-based |
-| **SBCL** | 275 | sb-bsd-sockets | ~13 MB (compressed) | Automatic (GC) | Manual |
-| **Bash** | 283 | socat, xxd | 8.9 KB (script) | N/A | Manual (socat/UDP) |
-| **Perl** | 302 | Core modules | 10 KB (script) | Manual | Manual (native sockets) |
-| **Erlang** | 304 | kernel, stdlib | 16 KB (BEAM) | Automatic (BEAM VM) | Manual (gen_udp) |
-| **Java** | 322 | JDK only | ~6 KB JAR | Automatic (GC) | Manual (DatagramSocket) |
-| **OCaml** | 368 | unix.cmxa | ~500 KB | Automatic (compile-time) | Manual |
-| **Swift** | 400 | Foundation | ~79 KB | Automatic (ARC) | Manual (BSD sockets) |
-| **Python** | 416 | Standard library | 14 KB (script) | Automatic (GC) | Manual |
-| **Rust** | 521 | libc, chrono | ~500 KB - 1 MB | Automatic (compile-time) | Manual |
-| **C** | 539 | Standard C library | ~20-30 KB (stripped) | Manual | Manual |
+| Implementation | Lines of Code | Dependencies | Binary Size | Memory Safety | NTP Implementation | Time Setting Method |
+|---------------|---------------|--------------|-------------|---------------|-------------------|---------------------|
+| **Go** | 274 | beevik/ntp | ~2-3 MB | Automatic (GC) | Library-based | syscall.Settimeofday() |
+| **SBCL** | 275 | sb-bsd-sockets | ~13 MB (compressed) | Automatic (GC) | Manual | FFI settimeofday() |
+| **Bash** | 283 | socat, xxd | 8.9 KB (script) | N/A | Manual (socat/UDP) | date command |
+| **Perl** | 302 | Core modules | 10 KB (script) | Manual | Manual (native sockets) | Time::HiRes::settimeofday() |
+| **Erlang** | 304 | kernel, stdlib | 16 KB (BEAM) | Automatic (BEAM VM) | Manual (gen_udp) | Port: date command |
+| **Java** | 322 | JDK only | ~6 KB JAR | Automatic (GC) | Manual (DatagramSocket) | Not implemented |
+| **OCaml** | 368 | unix.cmxa | ~500 KB | Automatic (compile-time) | Manual | Unix.settimeofday() |
+| **Ruby** | 386 | Standard library | 10 KB (script) | Automatic (GC) | Manual (native sockets) | Fiddle FFI / date fallback |
+| **Swift** | 400 | Foundation | ~79 KB | Automatic (ARC) | Manual (BSD sockets) | settimeofday() syscall |
+| **Lua** | 415 | luasocket | 12 KB (script) | Automatic (GC) | Manual (LuaSocket UDP) | LuaJIT FFI / posix fallback |
+| **Python** | 416 | Standard library | 14 KB (script) | Automatic (GC) | Manual | ctypes clock_settime() |
+| **Rust** | 521 | libc, chrono | ~500 KB - 1 MB | Automatic (compile-time) | Manual | libc::settimeofday() |
+| **C** | 539 | Standard C library | ~20-30 KB (stripped) | Manual | Manual | settimeofday() syscall |
 
 ### Platform Support
 
@@ -132,12 +140,13 @@ timesync -h
 - **Erlang**: Systems with Erlang/OTP runtime
 - **SBCL**: Systems with Steel Bank Common Lisp compiler/runtime
 - **Java**: Cross-platform (any system with JRE 8+)
+- **Ruby**: Unix-like systems with Ruby 2.5+
 - **Swift**: macOS, Linux (with Swift runtime)
+- **Lua**: Unix-like systems with Lua 5.1+ or LuaJIT
 ### Build Systems
 
 - **C, Go, Rust, OCaml, Perl, Erlang, SBCL, Java, Swift**: Makefile provided
-- **Python, Bash**: No build required (scripts)a**: Makefile provided
-- **Python, Bash**: No build required (scripts)
+- **Python, Bash, Lua, Ruby**: No build required (scripts)
 
 All implementations support the same command-line interface and behavior.
 
@@ -198,6 +207,20 @@ Each implementation directory contains its own README with specific build and us
 - Root privilege checking via `getuid()`
 - Produces smallest optimized binary (~79 KB)
 - Syslog support disabled (Swift limitation with variadic C functions)
+
+### Lua Implementation
+- Lua 5.1 or higher, or LuaJIT (recommended)
+- LuaSocket library for UDP networking
+- Optional: LuaJIT (for FFI-based `settimeofday()`) or lua-posix
+- Root privilege checking via FFI or fallback to `id` command
+- Time setting via LuaJIT FFI or lua-posix (no `date` command fallback)
+
+### Ruby Implementation
+- Ruby 2.5 or higher (standard library only)
+- No external gems required
+- Root privilege checking via `Process.uid`
+- Time setting via Fiddle FFI (primary) with `date` command fallback
+- Clean object-oriented design with Config, Logger, NTPClient, TimeSetter classes
 
 ## Security Considerations
 

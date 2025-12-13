@@ -73,8 +73,12 @@ class Logger
 
   def log(level, message)
     timestamp = Time.now.strftime('%Y-%m-%d %H:%M:%S')
-    $stderr.puts "#{timestamp} [#{level}] #{message}" if @config.verbose
+    $stderr.puts "#{timestamp} #{level} #{message}" if @config.verbose
     @syslog&.send(level.downcase.to_sym, message) if @config.use_syslog
+  end
+
+  def debug(message)
+    log('DEBUG', message)
   end
 
   def info(message)
@@ -120,7 +124,7 @@ class NTPClient
     begin
       addrinfo = Socket.getaddrinfo(@config.server, nil, Socket::AF_UNSPEC, Socket::SOCK_DGRAM)
       ip = addrinfo[0][3]
-      @logger.info("Resolved #{@config.server} to #{ip}")
+      @logger.debug("Server: #{@config.server} (#{ip})")
     rescue SocketError => e
       @logger.error("Cannot resolve hostname: #{@config.server}")
       return nil
@@ -139,9 +143,9 @@ class NTPClient
       # Send request
       request = create_ntp_request
       t1_ms = (Time.now.to_f * 1000).to_i
+      local_before_time = Time.at(t1_ms / 1000.0).utc
 
       socket.send(request, 0)
-      @logger.info("Sent NTP request to #{ip}:#{NTP_PORT}")
 
       # Receive response
       response, _ = socket.recvfrom(NTP_PACKET_SIZE)
@@ -151,8 +155,6 @@ class NTPClient
         @logger.error("Received incomplete packet: #{response.length} bytes")
         return nil
       end
-
-      @logger.info("Received #{response.length} bytes from server")
 
       # Parse timestamps
       t2_ms = ntp_to_unix_ms(response, 32)  # Receive timestamp
@@ -167,7 +169,16 @@ class NTPClient
       offset_ms = ((t2_ms - t1_ms) + (t3_ms - t4_ms)) / 2
       rtt_ms = (t4_ms - t1_ms) - (t3_ms - t2_ms)
 
-      @logger.info("RTT=#{rtt_ms} ms, Offset=#{offset_ms} ms")
+      # Format times for debug output
+      local_after_time = Time.at(t4_ms / 1000.0).utc
+      remote_time = Time.at(t3_ms / 1000.0).utc
+      
+      @logger.debug("Local time: #{local_before_time.strftime('%Y-%m-%dT%H:%M:%S')}+0000.#{t1_ms % 1000}")
+      @logger.debug("Remote time: #{remote_time.strftime('%Y-%m-%dT%H:%M:%S')}+0000.#{t3_ms % 1000}")
+      @logger.debug("Local before(ms): #{t1_ms}")
+      @logger.debug("Local after(ms): #{t4_ms}")
+      @logger.debug("Estimated roundtrip(ms): #{rtt_ms}")
+      @logger.debug("Estimated offset remote - local(ms): #{offset_ms}")
 
       {
         offset_ms: offset_ms,
@@ -184,7 +195,7 @@ class NTPClient
 
   def query_with_retries
     @config.retries.times do |attempt|
-      @logger.info("Retry attempt #{attempt + 1}/#{@config.retries}") if attempt > 0
+      @logger.debug("Attempt (#{attempt + 1}) at NTP query on #{@config.server} ...") if attempt == 0 || @config.verbose
 
       result = query_server
       return result if result
@@ -202,6 +213,15 @@ class TimeSetter
   def initialize(config, logger)
     @config = config
     @logger = logger
+    @ffi_available = setup_ffi
+  end
+
+  def setup_ffi
+    require 'fiddle'
+    require 'fiddle/import'
+    true
+  rescue LoadError
+    false
   end
 
   def root?
@@ -218,52 +238,45 @@ class TimeSetter
     new_time_usec = ((remote_ms + offset_ms) % 1000) * 1000
 
     # Try settimeofday via fiddle (FFI)
-    begin
-      require 'fiddle'
-      require 'fiddle/import'
+    if @ffi_available
+      begin
+        libc = Fiddle::Handle::DEFAULT
+        settimeofday_ptr = Fiddle::Function.new(
+          libc['settimeofday'],
+          [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+          Fiddle::TYPE_INT
+        )
 
-      module LibC
-        extend Fiddle::Importer
-        dlload Fiddle::Handle::DEFAULT
+        # Pack timeval struct: tv_sec (long) + tv_usec (long)
+        timeval = [new_time_sec, new_time_usec].pack('q!q!')
+        
+        result = settimeofday_ptr.call(timeval, nil)
 
-        Timeval = struct([
-          'long tv_sec',
-          'long tv_usec'
-        ])
-
-        extern 'int settimeofday(void*, void*)'
+        if result.zero?
+          @logger.info('System time updated successfully')
+          return [true, 0]
+        else
+          @logger.error("Failed to set system time: errno #{result}")
+          return [false, 10]
+        end
+      rescue StandardError => e
+        @logger.warning("settimeofday via FFI failed (#{e.message}), trying date command")
       end
+    end
 
-      tv = LibC::Timeval.malloc
-      tv.tv_sec = new_time_sec
-      tv.tv_usec = new_time_usec
+    # Fallback to date command
+    time = Time.at(new_time_sec).utc
+    date_str = time.strftime('%Y%m%d%H%M.%S')
+    cmd = "date -u #{date_str} > /dev/null 2>&1"
 
-      result = LibC.settimeofday(tv, nil)
+    @logger.info("Setting system time to #{date_str}")
 
-      if result.zero?
-        @logger.info('System time updated successfully')
-        return [true, 0]
-      else
-        @logger.error("Failed to set system time: errno #{result}")
-        return [false, 10]
-      end
-    rescue LoadError, StandardError => e
-      # Fallback to date command
-      @logger.warning("settimeofday via FFI failed (#{e.message}), trying date command")
-
-      time = Time.at(new_time_sec).utc
-      date_str = time.strftime('%Y%m%d%H%M.%S')
-      cmd = "date -u #{date_str} > /dev/null 2>&1"
-
-      @logger.info("Setting system time to #{date_str}")
-
-      if system(cmd)
-        @logger.info('System time updated successfully')
-        return [true, 0]
-      else
-        @logger.error('Failed to set system time')
-        return [false, 10]
-      end
+    if system(cmd)
+      @logger.info('System time updated successfully')
+      return [true, 0]
+    else
+      @logger.error('Failed to set system time')
+      return [false, 10]
     end
   end
 
@@ -365,14 +378,11 @@ class TimeSync
   end
 
   def run
-    @logger.info("Starting timesync for server: #{@config.server}")
-    @logger.info("Timeout: #{@config.timeout_ms} ms, Retries: #{@config.retries}")
+    @logger.debug("Using server: #{@config.server}")
+    @logger.debug("Timeout: #{@config.timeout_ms} ms, Retries: #{@config.retries}, Syslog: #{@config.use_syslog ? 'on' : 'off'}")
 
     result = @client.query_with_retries
     return 2 unless result
-
-    # Always print RTT and offset (even without -v)
-    $stderr.puts "RTT=#{result[:rtt_ms]} ms, Offset=#{result[:offset_ms]} ms"
 
     @setter.validate_and_set_time(result)
   end

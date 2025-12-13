@@ -36,7 +36,24 @@
 ]]
 
 local socket = require("socket")
-local posix = pcall(require, "posix")
+local ffi_available, ffi = pcall(require, "ffi")
+local posix_available, posix = pcall(require, "posix")
+
+-- FFI definitions for settimeofday
+if ffi_available then
+    ffi.cdef[[
+        typedef long time_t;
+        typedef long suseconds_t;
+        
+        struct timeval {
+            time_t tv_sec;
+            suseconds_t tv_usec;
+        };
+        
+        int geteuid(void);
+        int settimeofday(const struct timeval *tv, const void *tz);
+    ]]
+end
 
 -- Constants
 local NTP_PACKET_SIZE = 48
@@ -60,12 +77,16 @@ local config = {
 local function log_message(level, message)
     local timestamp = os.date("%Y-%m-%d %H:%M:%S")
     if config.verbose then
-        io.stderr:write(string.format("%s [%s] %s\n", timestamp, level, message))
+        io.stderr:write(string.format("%s %s %s\n", timestamp, level, message))
     end
     if config.use_syslog and posix then
         -- Basic syslog output (simplified)
         os.execute(string.format("logger -t timesync '%s: %s'", level, message))
     end
+end
+
+local function log_debug(message)
+    log_message("DEBUG", message)
 end
 
 local function log_info(message)
@@ -126,7 +147,7 @@ local function query_ntp_server()
         return nil, "DNS resolution failed"
     end
     
-    log_info(string.format("Resolved %s to %s", config.server, ip))
+    log_debug(string.format("Server: %s (%s)", config.server, ip))
     
     local request = create_ntp_request()
     local t1_ms = math.floor(socket.gettime() * 1000)
@@ -138,8 +159,6 @@ local function query_ntp_server()
         udp:close()
         return nil, "send failed"
     end
-    
-    log_info(string.format("Sent NTP request to %s:%d", ip, NTP_PORT))
     
     -- Receive response
     local response, err = udp:receive(NTP_PACKET_SIZE)
@@ -157,8 +176,6 @@ local function query_ntp_server()
         return nil, "incomplete packet"
     end
     
-    log_info(string.format("Received %d bytes from server", #response))
-    
     -- Parse timestamps
     local t2_ms = ntp_to_unix_ms(response, 33)  -- Receive timestamp
     local t3_ms = ntp_to_unix_ms(response, 41)  -- Transmit timestamp
@@ -172,7 +189,16 @@ local function query_ntp_server()
     local offset_ms = math.floor(((t2_ms - t1_ms) + (t3_ms - t4_ms)) / 2)
     local rtt_ms = (t4_ms - t1_ms) - (t3_ms - t2_ms)
     
-    log_info(string.format("RTT=%d ms, Offset=%d ms", rtt_ms, offset_ms))
+    -- Format times for debug output
+    local local_before_time = os.date("!%Y-%m-%dT%H:%M:%S", math.floor(t1_ms / 1000))
+    local remote_time = os.date("!%Y-%m-%dT%H:%M:%S", math.floor(t3_ms / 1000))
+    
+    log_debug(string.format("Local time: %s+0000.%03d", local_before_time, t1_ms % 1000))
+    log_debug(string.format("Remote time: %s+0000.%03d", remote_time, t3_ms % 1000))
+    log_debug(string.format("Local before(ms): %d", t1_ms))
+    log_debug(string.format("Local after(ms): %d", t4_ms))
+    log_debug(string.format("Estimated roundtrip(ms): %d", rtt_ms))
+    log_debug(string.format("Estimated offset remote - local(ms): %d", offset_ms))
     
     return {
         offset_ms = offset_ms,
@@ -183,8 +209,13 @@ end
 
 -- Check if running as root
 local function is_root()
-    -- Try to use posix library if available
-    if posix and type(posix.geteuid) == "function" then
+    -- Try FFI first (LuaJIT)
+    if ffi_available then
+        return ffi.C.geteuid() == 0
+    end
+    
+    -- Try posix library
+    if posix_available and posix.geteuid then
         return posix.geteuid() == 0
     end
     
@@ -209,20 +240,37 @@ local function set_system_time(remote_ms, offset_ms)
     local new_time_sec = math.floor((remote_ms + offset_ms) / 1000)
     local new_time_usec = ((remote_ms + offset_ms) % 1000) * 1000
     
-    -- Format for date command: YYYYMMDDhhmm.ss
-    local date_str = os.date("!%Y%m%d%H%M.%S", new_time_sec)
-    local cmd = string.format("date -u %s > /dev/null 2>&1", date_str)
-    
-    log_info(string.format("Setting system time to %s", date_str))
-    
-    local result = os.execute(cmd)
-    if result == 0 or result == true then
-        log_info("System time updated successfully")
-        return true, 0
-    else
-        log_error("Failed to set system time")
-        return false, 10
+    -- Try FFI first (LuaJIT)
+    if ffi_available then
+        local tv = ffi.new("struct timeval")
+        tv.tv_sec = new_time_sec
+        tv.tv_usec = new_time_usec
+        
+        local result = ffi.C.settimeofday(tv, nil)
+        if result == 0 then
+            log_info("System time updated successfully")
+            return true, 0
+        else
+            log_error(string.format("Failed to set system time: errno %d", result))
+            return false, 10
+        end
     end
+    
+    -- Try posix library
+    if posix_available and posix.gettimeofday and posix.settimeofday then
+        local result = posix.settimeofday({sec = new_time_sec, usec = new_time_usec})
+        if result == 0 then
+            log_info("System time updated successfully")
+            return true, 0
+        else
+            log_error("Failed to set system time via posix")
+            return false, 10
+        end
+    end
+    
+    -- No FFI available
+    log_error("Cannot set system time: no FFI support (install LuaJIT or lua-posix)")
+    return false, 10
 end
 
 -- Validate and set time if needed
@@ -261,8 +309,8 @@ end
 -- Main query function with retries
 local function query_with_retries()
     for attempt = 1, config.retries do
-        if attempt > 1 then
-            log_info(string.format("Retry attempt %d/%d", attempt, config.retries))
+        if attempt == 1 or config.verbose then
+            log_debug(string.format("Attempt (%d) at NTP query on %s ...", attempt, config.server))
         end
         
         local result, err = query_ntp_server()
@@ -355,16 +403,14 @@ end
 local function main(args)
     parse_args(args)
     
-    log_info(string.format("Starting timesync for server: %s", config.server))
-    log_info(string.format("Timeout: %d ms, Retries: %d", config.timeout_ms, config.retries))
+    log_debug(string.format("Using server: %s", config.server))
+    log_debug(string.format("Timeout: %d ms, Retries: %d, Syslog: %s", 
+        config.timeout_ms, config.retries, config.use_syslog and "on" or "off"))
     
     local result = query_with_retries()
     if not result then
         return 2
     end
-    
-    -- Always print RTT and offset (even without -v)
-    io.stderr:write(string.format("RTT=%d ms, Offset=%d ms\n", result.rtt_ms, result.offset_ms))
     
     return validate_and_set_time(result)
 end
