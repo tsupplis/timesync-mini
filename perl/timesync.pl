@@ -273,24 +273,42 @@ sub do_ntp_query {
             return 0;
         }
         
+        # Check if running as root
+        if ($< != 0) {  # $< is effective UID
+            log_stderr("WARNING Not root, not setting system time.");
+            log_syslog(LOG_WARNING, "Not root, not setting system time")
+                if $config{use_syslog};
+            return 10;
+        }
+        
         # Set system time
         my $new_time_sec = int($remote_ms / 1000);
         my $new_time_usec = ($remote_ms % 1000) * 1000;
         
-        # Try settimeofday (requires root)
-        my $tv = pack('L!L!', $new_time_sec, $new_time_usec);
-        my $tz = pack('l!l!', 0, 0);
+        # Load Time::HiRes for settimeofday
+        eval {
+            require Time::HiRes;
+            Time::HiRes->import('settimeofday');
+        };
         
-        # Use syscall for settimeofday
-        if (syscall(122, $tv, $tz) == 0) {  # 122 is settimeofday on most systems
+        if ($@) {
+            log_stderr("ERROR Time::HiRes::settimeofday not available");
+            log_syslog(LOG_ERR, "Time::HiRes::settimeofday not available")
+                if $config{use_syslog};
+            return 10;
+        }
+        
+        # Try settimeofday (requires root)
+        if (eval { Time::HiRes::settimeofday($new_time_sec, $new_time_usec); 1 }) {
             if ($config{verbose}) {
                 log_stderr(sprintf("INFO System time set (%s)", format_time($remote_ms)));
                 log_syslog(LOG_INFO, sprintf("System time set (%s)", format_time($remote_ms)));
             }
             return 0;
         } else {
-            log_stderr("ERROR Failed to adjust system time");
-            log_syslog(LOG_ERR, "Failed to adjust system time");
+            log_stderr("ERROR Failed to adjust system time: $@");
+            log_syslog(LOG_ERR, "Failed to adjust system time")
+                if $config{use_syslog};
             return 10;
         }
     }
