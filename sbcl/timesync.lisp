@@ -93,10 +93,25 @@
                ((not (char= (char arg 0) #\-))
                 (setf (config-server config) arg))))
     config))
+(defun get-time-ms ()
+  (multiple-value-bind (sec usec) (sb-ext:get-time-of-day)
+    (+ (* sec 1000) (truncate usec 1000))))
 
 (defun get-time-ms ()
   (multiple-value-bind (sec usec) (sb-ext:get-time-of-day)
     (+ (* sec 1000) (truncate usec 1000))))
+
+;; FFI for getuid and settimeofday
+(sb-alien:define-alien-routine ("getuid" unix-getuid) sb-alien:unsigned-int)
+
+(sb-alien:define-alien-type nil
+  (sb-alien:struct timeval
+    (tv-sec sb-alien:long)
+    (tv-usec sb-alien:long)))
+
+(sb-alien:define-alien-routine ("settimeofday" unix-settimeofday) sb-alien:int
+  (tv (* (sb-alien:struct timeval)))
+  (tz sb-alien:int))
 
 (defun build-ntp-request ()
   (let ((packet (make-array +ntp-packet-size+ :element-type '(unsigned-byte 8) :initial-element 0)))
@@ -213,8 +228,26 @@
          (log-stderr "INFO Test mode: would adjust system time by ~D ms" offset))
        0)
       (t
-       (log-stderr "ERROR Time setting not implemented in SBCL (use C extension)")
-       10))))
+       ;; Check if running as root
+       (when (/= (unix-getuid) 0)
+         (log-stderr "WARNING Not root, not setting system time.")
+         (return-from validate-and-set-time 10))
+       
+       ;; Set system time using FFI
+       (let* ((new-sec (truncate remote-ms 1000))
+              (new-usec (* (mod remote-ms 1000) 1000)))
+         (sb-alien:with-alien ((tv (sb-alien:struct timeval)))
+           (setf (sb-alien:slot tv 'tv-sec) new-sec)
+           (setf (sb-alien:slot tv 'tv-usec) new-usec)
+           (let ((result (unix-settimeofday (sb-alien:addr tv) 0)))
+             (if (zerop result)
+                 (progn
+                   (when (config-verbose config)
+                     (log-stderr "INFO System time set (~D ms)" remote-ms))
+                   0)
+                 (progn
+                   (log-stderr "ERROR Failed to adjust system time")
+                   10)))))))))
 
 (defun do-ntp-attempt (config attempt)
   (when (config-verbose config)
@@ -271,5 +304,9 @@
   (main (rest sb-ext:*posix-argv*)))
 
 ;; Entry point for script mode
-(when (member "--script" sb-ext:*posix-argv* :test #'string=)
-  (main sb-ext:*posix-argv*))
+;; When loaded via --script, SBCL runs top-level forms automatically
+;; In script mode, argv contains only the script arguments (not "sbcl" or "--script")
+;; We detect script mode by checking if timesync-main function hasn't been called yet
+(unless (find-package :compiled-program)
+  ;; In script mode, just call main with the actual script arguments
+  (main (rest sb-ext:*posix-argv*)))

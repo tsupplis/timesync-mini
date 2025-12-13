@@ -23,25 +23,19 @@ Build the native binary:
 make
 ```
 
-This creates two executables:
+This creates:
 - `timesync` - Native compiled binary (~13 MB with compression)
-- `timesync.sh` - Script wrapper that loads the .lisp file
 
 ## Usage
-
-Run compiled binary:
-```sh
-./timesync [options] [ntp-server]
-```
 
 Run as script directly:
 ```sh
 sbcl --script timesync.lisp [options] [ntp-server]
 ```
 
-Or using generated wrapper:
+Or run compiled binary:
 ```sh
-./timesync.sh [options] [ntp-server]
+./timesync [options] [ntp-server]
 ```
 
 ### Options
@@ -95,16 +89,19 @@ The implementation supports two execution modes:
    - Uses runtime-interpreted bytecode
    - Startup overhead: ~50-100 ms
 
+1. **Script Mode**: Fast development cycle, no compilation
+   - Run with `sbcl --script timesync.lisp [args]`
+   - Uses runtime-interpreted bytecode
+   - Startup overhead: ~50-100 ms
+   - Requires SBCL to be installed
+
 2. **Binary Mode**: Standalone executable
    - Compile with `make`
-   - Single file distribution
-   - Includes full SBCL runtime (~13 MB compressed)
-   - Startup overhead: ~20-50 ms
-
-## Notes
-
 - Binary size is large due to embedded SBCL runtime
-- Setting system time requires root/administrator privileges
+- Setting system time requires root/administrator privileges (checked with FFI getuid)
 - Combined flags supported (e.g., `-nv`, `-nvs`)
+- Script mode is ideal for development; binary for distribution
+- The binary is platform-specific (recompile for each architecture)
+- Script mode requires SBCL; binary mode is standalone
 - Script mode is ideal for development; binary for distribution
 - The binary is platform-specific (recompile for each architecture)
