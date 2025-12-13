@@ -115,5 +115,5 @@ build/
 *.xcworkspace/
 
 # C#
-csharp/bin
-csharp/obj
+csharp/bin/**
+csharp/obj/**
