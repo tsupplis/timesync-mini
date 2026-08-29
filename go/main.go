@@ -24,10 +24,10 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"log/syslog"
+	"math"
 	"net"
 	"os"
 	"time"
@@ -164,10 +164,11 @@ func main() {
 // Returns nil on success (including when no adjustment is needed),
 // or an error that causes the retry loop to retry.
 func timeSync(server string, cfg *Config, timeout time.Duration, syslogWriter *syslog.Writer) error {
-	// Resolve server address — report IP in verbose output matching C
+	// Resolve server address — C's getaddrinfo is silent on failure, but we
+	// have an explicit DNS step so log a meaningful message (fix A)
 	ips, err := net.LookupIP(server)
 	if err != nil {
-		stderrLog(fmt.Sprintf("WARNING setsockopt SO_RCVTIMEO failed: %v", err))
+		stderrLog(fmt.Sprintf("WARNING Failed to resolve %s: %v", server, err))
 		return err
 	}
 	serverAddr := ips[0].String()
@@ -187,6 +188,15 @@ func timeSync(server string, cfg *Config, timeout time.Duration, syslogWriter *s
 
 	// Remote transmit time with clock offset applied, converted to ms
 	remoteMs := time.Now().Add(response.ClockOffset).UnixMilli()
+
+	// Overflow guard on avg calculation, matching C's INT64_MAX check (fix C)
+	if localBeforeMs > 0 && localAfterMs > math.MaxInt64-localBeforeMs {
+		stderrLog("ERROR Time averaging would overflow, invalid timestamps.")
+		if syslogWriter != nil {
+			syslogWriter.Err("Time averaging would overflow")
+		}
+		os.Exit(1)
+	}
 
 	// SNTP offset and roundtrip, matching C's formula:
 	//   offset = remote - (before + after) / 2
@@ -217,13 +227,13 @@ func timeSync(server string, cfg *Config, timeout time.Duration, syslogWriter *s
 		}
 	}
 
-	// Roundtrip sanity check, matching C's 0–10000 ms guard
+	// Roundtrip sanity check — exit 1 immediately like C, do not retry (fix B)
 	if roundtripMs < 0 || roundtripMs > 10000 {
 		stderrLog(fmt.Sprintf("ERROR Invalid roundtrip time: %d ms", roundtripMs))
 		if syslogWriter != nil {
 			syslogWriter.Err(fmt.Sprintf("Invalid suspiciously long roundtrip time: %d ms", roundtripMs))
 		}
-		return errors.New("invalid roundtrip time")
+		os.Exit(1)
 	}
 
 	// Delta < 500ms: skip adjustment, matching C's llabs(offset_ms) < 500 condition
@@ -241,14 +251,14 @@ func timeSync(server string, cfg *Config, timeout time.Duration, syslogWriter *s
 		return nil
 	}
 
-	// Year range check, matching C's 2025–2200 guard
+	// Year range check — exit 1 immediately like C, do not retry (fix B)
 	remoteYear := remoteTime.Year()
 	if remoteYear < 2025 || remoteYear > 2200 {
 		stderrLog(fmt.Sprintf("ERROR Remote year is out of valid range (2025-2200): %d", remoteYear))
 		if syslogWriter != nil {
 			syslogWriter.Err(fmt.Sprintf("Remote year is out of valid range (2025-2200): %d", remoteYear))
 		}
-		return errors.New("remote year out of valid range")
+		os.Exit(1)
 	}
 
 	if cfg.Test {
@@ -266,16 +276,24 @@ func timeSync(server string, cfg *Config, timeout time.Duration, syslogWriter *s
 
 	// Half-RTT correction before setting time, matching C's remote_ms + half_rtt
 	halfRtt := roundtripMs / 2
+	if remoteMs > math.MaxInt64-halfRtt {
+		stderrLog("ERROR Time calculation would overflow, not adjusting system time.")
+		if syslogWriter != nil {
+			syslogWriter.Err("Time calculation would overflow")
+		}
+		os.Exit(1)
+	}
 	newTime := time.UnixMilli(remoteMs + halfRtt).Local()
 
 	const api = "settimeofday"
+	// Set-time failure — exit 10 immediately like C, do not retry (fix B)
 	err = setSystemDate(newTime, 0, false)
 	if err != nil {
 		stderrLog(fmt.Sprintf("ERROR Failed to adjust system time with %s: %v", api, err))
 		if syslogWriter != nil {
 			syslogWriter.Err(fmt.Sprintf("Failed to adjust system time with %s: %v", api, err))
 		}
-		return errors.New("failed to set system time")
+		os.Exit(10)
 	}
 
 	stderrLog(fmt.Sprintf("INFO System time set using %s (%s)", api, remoteTimeStr))
