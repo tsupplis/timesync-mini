@@ -3,8 +3,9 @@
 local: timesync
 
 all: local timesync-openbsd-amd64 timesync-netbsd-amd64 timesync-freebsd-amd64 \
-	timesync-linux-amd64 timesync-linux-386 timesync-linux-riscv64 timesync-solaris-amd64
-	
+	timesync-linux-amd64 timesync-linux-386 timesync-linux-riscv64 timesync-solaris-amd64 \
+	timesync-illumos-amd64 
+		
 timesync: main.go settime-darwin64.go 
 	go build -ldflags="-s -w" -o $@ $*
 
@@ -16,6 +17,9 @@ timesync-netbsd-amd64: main.go settime-netbsd64.go
 
 timesync-solaris-amd64: main.go settime-solaris64.go
 	GOOS=solaris GOARCH=amd64 go build -ldflags="-s -w" -o $@ $*
+
+timesync-illumos-amd64: main.go settime-solaris64.go
+	GOOS=illumos GOARCH=amd64 go build -ldflags="-s -w" -o $@ $*
 
 timesync-linux-riscv64: main.go settime-linux64.go
 	GOOS=linux GOARCH=riscv64 go build -ldflags="-s -w" -o $@ $*
