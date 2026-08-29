@@ -22,6 +22,15 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+//
+// Swift port of the C implementation
+//
+// Build:
+//   swiftc -O -o timesync timesync.swift
+//
+// Usage:
+//   ./timesync                    # query pool.ntp.org
+//   ./timesync -t 1500 -r 2 -v time.google.com
 
 import Foundation
 #if canImport(Darwin)
@@ -30,15 +39,17 @@ import Darwin
 import Glibc
 #endif
 
-// Constants
+// MARK: - Constants
+
 let NTP_PORT: UInt16 = 123
 let NTP_PACKET_SIZE = 48
-let NTP_UNIX_EPOCH_DIFF: UInt32 = 2208988800
+let NTP_UNIX_EPOCH_DIFF: UInt64 = 2208988800
 let DEFAULT_SERVER = "pool.ntp.org"
 let DEFAULT_TIMEOUT_MS = 2000
 let DEFAULT_RETRIES = 3
 
-// Configuration
+// MARK: - Config
+
 struct Config {
     var server: String = DEFAULT_SERVER
     var timeoutMs: Int = DEFAULT_TIMEOUT_MS
@@ -48,353 +59,384 @@ struct Config {
     var useSyslog: Bool = false
 }
 
-// Logging functions
+// MARK: - Logging
+
+/// Log to stderr with timestamp — matches C's stderr_log format: "YYYY-MM-DD HH:MM:SS <message>"
 func stderrLog(_ message: String) {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-    let timestamp = formatter.string(from: Date())
+    var now = time(nil)
+    var tm = tm()
+    localtime_r(&now, &tm)
+    var buf = [CChar](repeating: 0, count: 32)
+    strftime(&buf, buf.count, "%Y-%m-%d %H:%M:%S", &tm)
+    let timestamp = String(cString: buf)
     fputs("\(timestamp) \(message)\n", stderr)
-    fflush(stderr)
 }
 
-// Usage
+/// Write a message to syslog at the given priority.
+/// Uses vsyslog+withVaList to work around Swift's restriction on variadic C functions.
+func syslogWrite(_ priority: Int32, _ message: String) {
+    message.withCString { msg in
+        withVaList([msg]) { args in vsyslog(priority, "%s", args) }
+    }
+}
+
+// MARK: - Usage
+
 func showUsage() {
-    fputs("""
-Usage: timesync [-t timeout_ms] [-r retries] [-n] [-v] [-s] [-h] [ntp server]
-  server       NTP server to query (default: pool.ntp.org)
-  -t timeout   Timeout in ms (default: 2000)
-  -r retries   Number of retries (default: 3)
-  -n           Test mode (no system time adjustment)
-  -v           Verbose output
-  -s           Enable syslog logging
-  -h           Show this help message
-""", stderr)
+    let prog = CommandLine.arguments[0]
+    fputs("Usage: \(prog) [-t timeout_ms] [-r retries] [-n] [-v] [-s] [-h] [ntp server]\n", stderr)
+    fputs("  server       NTP server to query (default: pool.ntp.org)\n", stderr)
+    fputs("  -t timeout   Timeout in ms (default: 2000)\n", stderr)
+    fputs("  -r retries   Number of retries (default: 3)\n", stderr)
+    fputs("  -n           Test mode (no system time adjustment)\n", stderr)
+    fputs("  -v           Verbose output\n", stderr)
+    fputs("  -s           Enable syslog logging\n", stderr)
+    fputs("  -h           Show this help message\n", stderr)
     exit(0)
 }
 
-// Parse command line arguments
+// MARK: - Argument parsing
+
 func parseArgs() -> Config {
     var config = Config()
     let args = CommandLine.arguments
     var i = 1
-    
+
     while i < args.count {
         let arg = args[i]
-        
-        if arg == "-h" {
+        switch arg {
+        case "-h":
             showUsage()
-        } else if arg == "-t" && i + 1 < args.count {
+        case "-t":
             i += 1
-            if let timeout = Int(args[i]) {
-                config.timeoutMs = max(1, min(6000, timeout))
+            if i < args.count, let v = Int(args[i]) {
+                // invalid/0 resets to default, >6000 clamps — matches C
+                if v <= 0 { config.timeoutMs = DEFAULT_TIMEOUT_MS }
+                else if v > 6000 { config.timeoutMs = 6000 }
+                else { config.timeoutMs = v }
             }
-        } else if arg == "-r" && i + 1 < args.count {
+        case "-r":
             i += 1
-            if let retries = Int(args[i]) {
-                config.retries = max(1, min(10, retries))
+            if i < args.count, let v = Int(args[i]) {
+                // invalid/0 resets to default, >10 clamps — matches C
+                if v <= 0 { config.retries = DEFAULT_RETRIES }
+                else if v > 10 { config.retries = 10 }
+                else { config.retries = v }
             }
-        } else if arg.hasPrefix("-") && arg.count > 1 && !arg.hasPrefix("--") {
-            // Handle combined flags like -nv
-            for char in arg.dropFirst() {
-                switch char {
-                case "h": showUsage()
-                case "n": config.testOnly = true
-                case "v": config.verbose = true
-                case "s": config.useSyslog = true
-                default: break
-                }
-            }
-        } else if !arg.hasPrefix("-") {
-            config.server = arg
+        case "-n": config.testOnly = true
+        case "-v": config.verbose = true
+        case "-s": config.useSyslog = true
+        default:
+            if !arg.hasPrefix("-") { config.server = arg }
+            // unknown flags silently ignored like C
         }
-        
         i += 1
     }
-    
-    // Disable syslog in test mode
-    if config.testOnly {
-        config.useSyslog = false
-    }
-    
+
+    if config.testOnly { config.useSyslog = false }
     return config
 }
 
-// Get current time in milliseconds
+// MARK: - Time helpers
+
+/// Current time in ms since Unix epoch — mirrors C's gettimeofday().
 func getTimeMs() -> Int64 {
     var tv = timeval()
     gettimeofday(&tv, nil)
     return Int64(tv.tv_sec) * 1000 + Int64(tv.tv_usec) / 1000
 }
 
-// Build NTP request packet
+/// Format ms-since-epoch as local ISO string with ms suffix — matches C's %Y-%m-%dT%H:%M:%S%z.
+func formatTime(_ ms: Int64) -> String {
+    var secs = time_t(ms / 1000)
+    var tm = tm()
+    localtime_r(&secs, &tm)
+    var buf = [CChar](repeating: 0, count: 64)
+    strftime(&buf, buf.count, "%Y-%m-%dT%H:%M:%S%z", &tm)
+    let msSuffix = String(format: "%03d", Int(ms % 1000))
+    return String(cString: buf) + "." + msSuffix
+}
+
+// MARK: - NTP protocol
+
+/// Build a 48-byte NTP request packet — LI=0, VN=4, Mode=3 → 0x23, matching C.
 func buildNtpRequest() -> [UInt8] {
     var packet = [UInt8](repeating: 0, count: NTP_PACKET_SIZE)
-    packet[0] = 0x1b  // LI=0, VN=3, Mode=3 (client)
+    packet[0] = 0x23
     return packet
 }
 
-// Parse NTP timestamp to Unix milliseconds
-func ntpToUnixMs(_ buffer: [UInt8], offset: Int) -> Int64? {
-    guard offset + 8 <= buffer.count else { return nil }
-    
-    let sec = UInt32(buffer[offset]) << 24 |
-              UInt32(buffer[offset + 1]) << 16 |
-              UInt32(buffer[offset + 2]) << 8 |
-              UInt32(buffer[offset + 3])
-    
-    let frac = UInt32(buffer[offset + 4]) << 24 |
-               UInt32(buffer[offset + 5]) << 16 |
-               UInt32(buffer[offset + 6]) << 8 |
-               UInt32(buffer[offset + 7])
-    
+/// Convert 8-byte big-endian NTP timestamp at buf[offset] to Unix ms.
+func ntpTsToUnixMs(_ buf: [UInt8], offset: Int) -> Int64? {
+    guard offset + 8 <= buf.count else { return nil }
+    let sec = UInt64(buf[offset]) << 24 | UInt64(buf[offset+1]) << 16
+            | UInt64(buf[offset+2]) << 8  | UInt64(buf[offset+3])
+    let frac = UInt64(buf[offset+4]) << 24 | UInt64(buf[offset+5]) << 16
+             | UInt64(buf[offset+6]) << 8  | UInt64(buf[offset+7])
     guard sec >= NTP_UNIX_EPOCH_DIFF else { return nil }
-    
-    let unixSec = UInt64(sec - NTP_UNIX_EPOCH_DIFF)
-    let unixMs = (UInt64(frac) * 1000) >> 32
-    
-    return Int64(unixSec * 1000 + unixMs)
+    let usec = (frac * 1_000_000) >> 32
+    let unixSec = sec - NTP_UNIX_EPOCH_DIFF
+    return Int64(unixSec * 1000 + usec / 1000)
 }
 
-// Format time as ISO string
-func formatTime(_ ms: Int64) -> String {
-    let sec = ms / 1000
-    let msec = ms % 1000
-    let date = Date(timeIntervalSince1970: TimeInterval(sec))
-    let formatter = DateFormatter()
-    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
-    return "\(formatter.string(from: date))+0000.\(String(format: "%03d", msec))"
+// MARK: - NTP query
+
+struct NtpResponse {
+    let localBeforeMs: Int64
+    let remoteMs: Int64
+    let localAfterMs: Int64
+    let serverAddr: String
 }
 
-// Set system time (requires root)
-func setSystemTime(_ ms: Int64) -> Bool {
-    let sec = Int(ms / 1000)
-    let usec = Int((ms % 1000) * 1000)
-    
-    var tv = timeval(tv_sec: sec, tv_usec: Int32(usec))
-    let result = settimeofday(&tv, nil)
-    
-    return result == 0
-}
+/// Single NTP query attempt. Returns NtpResponse on success, nil on any failure.
+func doNtpQuery(server: String, timeoutMs: Int) -> NtpResponse? {
+    // Resolve server — mirrors C's getaddrinfo(AF_UNSPEC, SOCK_DGRAM)
+    var hints = addrinfo()
+    hints.ai_family = AF_UNSPEC
+    hints.ai_socktype = SOCK_DGRAM
+    var res: UnsafeMutablePointer<addrinfo>? = nil
+    guard getaddrinfo(server, String(NTP_PORT), &hints, &res) == 0, let addrList = res else { return nil }
+    defer { freeaddrinfo(addrList) }
 
-// Perform NTP query
-func doNtpQuery(config: Config) -> Int32 {
-    if config.verbose {
-        stderrLog("DEBUG Using server: \(config.server)")
-        stderrLog("DEBUG Timeout: \(config.timeoutMs) ms, Retries: \(config.retries), Syslog: off")
-    }
-    
-    var attempt = 1
-    while attempt <= config.retries {
-        if config.verbose {
-            stderrLog("DEBUG Attempt (\(attempt)) at NTP query on \(config.server) ...")
-        }
-        
-        // Resolve hostname
-        guard let host = gethostbyname(config.server) else {
-            stderrLog("ERROR Cannot resolve hostname: \(config.server)")
-            if config.useSyslog {
-            }
-            return 2
-        }
-        
-        guard let addressList = host.pointee.h_addr_list,
-              let addressPtr = addressList[0] else {
-            stderrLog("ERROR Cannot resolve hostname: \(config.server)")
-            return 2
-        }
-        
-        // Create socket
-        let sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-        guard sockfd >= 0 else {
-            stderrLog("ERROR Cannot create socket")
-            return 2
-        }
-        
+    var rp: UnsafeMutablePointer<addrinfo>? = addrList
+    while let node = rp {
+        defer { rp = node.pointee.ai_next }
+
+        let sockfd = socket(node.pointee.ai_family, node.pointee.ai_socktype, node.pointee.ai_protocol)
+        guard sockfd >= 0 else { continue }
         defer { close(sockfd) }
-        
-        // Set timeout
-        var timeout = timeval()
-        timeout.tv_sec = config.timeoutMs / 1000
-        timeout.tv_usec = Int32((config.timeoutMs % 1000) * 1000)
-        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-        
-        // Build server address
-        var serverAddr = sockaddr_in()
-        serverAddr.sin_family = sa_family_t(AF_INET)
-        serverAddr.sin_port = NTP_PORT.bigEndian
-        memcpy(&serverAddr.sin_addr, addressPtr, Int(host.pointee.h_length))
-        
-        // Get IP string for logging
-        var ipStr = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
-        inet_ntop(AF_INET, &serverAddr.sin_addr, &ipStr, socklen_t(INET_ADDRSTRLEN))
-        let ipString = String(cString: ipStr)
-        
-        // Send NTP request
+
+        // Set receive timeout — mirrors C's setsockopt SO_RCVTIMEO
+        var tv = timeval()
+        tv.tv_sec = timeoutMs / 1000
+        tv.tv_usec = Int32((timeoutMs % 1000) * 1000)
+        if setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size)) < 0 {
+            stderrLog("WARNING setsockopt SO_RCVTIMEO failed: \(String(cString: strerror(errno)))")
+            continue
+        }
+
         let packet = buildNtpRequest()
         let localBefore = getTimeMs()
-        
-        let sendResult = packet.withUnsafeBytes { bufferPtr in
-            withUnsafePointer(to: serverAddr) { addrPtr in
-                addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    sendto(sockfd, bufferPtr.baseAddress, NTP_PACKET_SIZE, 0,
-                           sockaddrPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+
+        // Send
+        let sent = packet.withUnsafeBytes { bytes in
+            sendto(sockfd, bytes.baseAddress, NTP_PACKET_SIZE, 0,
+                   node.pointee.ai_addr, node.pointee.ai_addrlen)
+        }
+        guard sent == NTP_PACKET_SIZE else {
+            stderrLog("WARNING Failed to send NTP request")
+            continue
+        }
+
+        // Receive
+        var buf = [UInt8](repeating: 0, count: NTP_PACKET_SIZE)
+        var srcAddr = sockaddr_storage()
+        var srcLen = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let recvd = buf.withUnsafeMutableBytes { bytes in
+            withUnsafeMutablePointer(to: &srcAddr) { srcPtr in
+                srcPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                    recvfrom(sockfd, bytes.baseAddress, NTP_PACKET_SIZE, 0, sockPtr, &srcLen)
                 }
             }
         }
-        
-        guard sendResult >= 0 else {
-            if attempt < config.retries {
-                usleep(200000)  // 200ms
-                attempt += 1
-                continue
-            }
-            stderrLog("ERROR Failed to send NTP request")
-            return 2
-        }
-        
-        // Receive response
-        var response = [UInt8](repeating: 0, count: NTP_PACKET_SIZE)
-        var fromAddr = sockaddr_in()
-        var fromLen = socklen_t(MemoryLayout<sockaddr_in>.size)
-        
-        let recvResult = response.withUnsafeMutableBytes { bufferPtr in
-            withUnsafeMutablePointer(to: &fromAddr) { addrPtr in
-                addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPtr in
-                    recvfrom(sockfd, bufferPtr.baseAddress, NTP_PACKET_SIZE, 0,
-                            sockaddrPtr, &fromLen)
-                }
-            }
-        }
-        
         let localAfter = getTimeMs()
-        
-        guard recvResult == NTP_PACKET_SIZE else {
-            if attempt < config.retries {
-                usleep(200000)  // 200ms
-                attempt += 1
-                continue
-            }
-            stderrLog("ERROR Timeout waiting for NTP response")
-            if config.useSyslog {
-            }
-            return 2
-        }
-        
-        // Validate response
-        let mode = response[0] & 0x07
+
+        guard recvd >= NTP_PACKET_SIZE else { continue }
+
+        // Validate mode = 4 (server)
+        let mode = buf[0] & 0x07
         guard mode == 4 else {
-            stderrLog("ERROR Invalid mode in NTP response: \(mode)")
-            return 2
+            stderrLog("WARNING Invalid mode in NTP response: \(mode)")
+            continue
         }
-        
-        let stratum = response[1]
+        // Validate stratum != 0
+        let stratum = buf[1]
         guard stratum != 0 else {
-            stderrLog("ERROR Invalid stratum in NTP response")
-            return 2
+            stderrLog("WARNING Invalid stratum in NTP response: \(stratum)")
+            continue
         }
-        
-        // Parse transmit timestamp (bytes 40-47)
-        guard let remoteMs = ntpToUnixMs(response, offset: 40) else {
-            stderrLog("ERROR Invalid NTP timestamp")
-            return 2
+        // Validate version 1-4
+        let version = (buf[0] >> 3) & 0x07
+        guard (1...4).contains(version) else {
+            stderrLog("WARNING Invalid version in NTP response: \(version)")
+            continue
         }
-        
-        // Calculate offset and RTT
-        let avgLocal = (localBefore + localAfter) / 2
-        let offset = remoteMs - avgLocal
-        let rtt = localAfter - localBefore
-        
-        if config.verbose {
-            stderrLog("DEBUG Server: \(config.server) (\(ipString))")
-            stderrLog("DEBUG Local before(ms): \(localBefore)")
-            stderrLog("DEBUG Local after(ms): \(localAfter)")
-            stderrLog("DEBUG Remote time(ms): \(remoteMs)")
-            stderrLog("DEBUG Estimated roundtrip(ms): \(rtt)")
-            stderrLog("DEBUG Estimated offset remote - local(ms): \(offset)")
-            
-            if config.useSyslog {
-            }
+        // Extract transmit timestamp at bytes 40-47
+        guard let remoteMs = ntpTsToUnixMs(buf, offset: 40) else {
+            stderrLog("WARNING Invalid transmit timestamp in NTP response")
+            continue
         }
-        
-        // Validate RTT
-        guard rtt >= 0 && rtt <= 10000 else {
-            stderrLog("ERROR Invalid roundtrip time: \(rtt) ms")
-            if config.useSyslog {
-            }
-            return 1
-        }
-        
-        // Check if offset is small
-        let absOffset = abs(offset)
-        if absOffset > 0 && absOffset < 500 {
-            if config.verbose {
-                stderrLog("INFO Delta < 500ms, not setting system time.")
-                if config.useSyslog {
+
+        // Compose server address string from the source address
+        var ipStr = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        withUnsafePointer(to: &srcAddr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa in
+                switch Int32(sa.pointee.sa_family) {
+                case AF_INET:
+                    ptr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+                        var addr = $0.pointee.sin_addr
+                        inet_ntop(AF_INET, &addr, &ipStr, socklen_t(INET6_ADDRSTRLEN))
+                    }
+                case AF_INET6:
+                    ptr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
+                        var addr = $0.pointee.sin6_addr
+                        inet_ntop(AF_INET6, &addr, &ipStr, socklen_t(INET6_ADDRSTRLEN))
+                    }
+                default: break
                 }
             }
-            if config.useSyslog {
-            }
-            return 0
         }
-        
-        // Validate remote time year
-        let remoteSec = remoteMs / 1000
-        let remoteDate = Date(timeIntervalSince1970: TimeInterval(remoteSec))
-        let calendar = Calendar.current
-        let remoteYear = calendar.component(.year, from: remoteDate)
-        
-        guard remoteYear >= 2025 && remoteYear <= 2200 else {
-            stderrLog("ERROR Remote year is out of valid range (2025-2200): \(remoteYear)")
-            if config.useSyslog {
-            }
-            return 1
-        }
-        
-        // Test mode
-        if config.testOnly {
-            if config.verbose {
-                stderrLog("INFO Test mode: would adjust system time by \(offset) ms")
-                if config.useSyslog {
-                }
-            }
-            if config.useSyslog {
-            }
-            return 0
-        }
-        
-        // Check if running as root
-        if getuid() != 0 {
-            stderrLog("WARNING Not root, not setting system time.")
-            if config.useSyslog {
-            }
-            return 10
-        }
-        
-        // Set system time
-        if setSystemTime(remoteMs) {
-            if config.verbose {
-                stderrLog("INFO System time set (\(formatTime(remoteMs)))")
-                if config.useSyslog {
-                }
-            }
-            if config.useSyslog {
-            }
-            return 0
-        } else {
-            stderrLog("ERROR Failed to adjust system time")
-            if config.useSyslog {
-            }
-            return 10
-        }
+        let serverAddrStr = String(cString: ipStr)
+
+        return NtpResponse(localBeforeMs: localBefore, remoteMs: remoteMs,
+                           localAfterMs: localAfter, serverAddr: serverAddrStr)
     }
-    
-    if config.useSyslog {
-    }
-    return 2
+    return nil
 }
 
-// Main
+// MARK: - Set system time
+
+func setSystemTime(_ ms: Int64) -> Bool {
+    var tv = timeval()
+    tv.tv_sec = Int(ms / 1000)
+    tv.tv_usec = Int32((ms % 1000) * 1000)
+    return settimeofday(&tv, nil) == 0
+}
+
+// MARK: - Main logic
+
+func run(_ config: Config) -> Int32 {
+    // Verbose debug fires before syslog is opened — matching C
+    if config.verbose {
+        stderrLog("DEBUG Using server: \(config.server)")
+        stderrLog("DEBUG Timeout: \(config.timeoutMs) ms, Retries: \(config.retries), Syslog: \(config.useSyslog ? "on" : "off")")
+    }
+
+    if config.useSyslog {
+        openlog("ntp_client", LOG_PID | LOG_CONS, LOG_USER)
+        // Mirror C's atexit(closelog) — close syslog on process exit
+        atexit { closelog() }
+    }
+
+    var response: NtpResponse? = nil
+    for attempt in 0..<config.retries {
+        if config.verbose {
+            stderrLog("DEBUG Attempt (\(attempt + 1)) at NTP query on \(config.server) ...")
+        }
+        if let r = doNtpQuery(server: config.server, timeoutMs: config.timeoutMs) {
+            response = r
+            break
+        }
+        // Backoff fires on every failure including after last attempt — matches C
+        usleep(200_000)
+    }
+
+    guard let resp = response else {
+        stderrLog("ERROR Failed to contact NTP server \(config.server) after \(config.retries) attempts")
+        if config.useSyslog {
+            syslogWrite(LOG_ERR, "NTP query failed for \(config.server) after \(config.retries) attempts")
+        }
+        return 2
+    }
+
+    // Overflow guard on avg calculation — matches C's INT64_MAX check
+    guard resp.localBeforeMs <= Int64.max - resp.localAfterMs else {
+        stderrLog("ERROR Time averaging would overflow, invalid timestamps.")
+        if config.useSyslog { syslogWrite(LOG_ERR, "Time averaging would overflow") }
+        return 1
+    }
+    let avgLocalMs = (resp.localBeforeMs + resp.localAfterMs) / 2
+    let offsetMs   = resp.remoteMs - avgLocalMs
+    let roundtripMs = resp.localAfterMs - resp.localBeforeMs
+
+    // Parse remote time unconditionally before verbose block — matches C's execution order
+    let remoteTimeStr = formatTime(resp.remoteMs)
+    var remoteSecs = time_t(resp.remoteMs / 1000)
+    var remoteTm = tm()
+    localtime_r(&remoteSecs, &remoteTm)
+    let remoteYear = Int(remoteTm.tm_year) + 1900
+
+    if config.verbose {
+        stderrLog("DEBUG Server: \(config.server) (\(resp.serverAddr))")
+        // local time: date from localBeforeMs, ms suffix from localAfterMs — matches C
+        var localSecs = time_t(resp.localBeforeMs / 1000)
+        var localTm = tm()
+        localtime_r(&localSecs, &localTm)
+        var localBuf = [CChar](repeating: 0, count: 64)
+        strftime(&localBuf, localBuf.count, "%Y-%m-%dT%H:%M:%S%z", &localTm)
+        let localMsSuffix = String(format: "%03d", Int(resp.localAfterMs % 1000))
+        let localTimeStr = String(cString: localBuf) + "." + localMsSuffix
+        stderrLog("DEBUG Local time: \(localTimeStr)")
+        stderrLog("DEBUG Remote time: \(remoteTimeStr)")
+        stderrLog("DEBUG Local before(ms): \(resp.localBeforeMs)")
+        stderrLog("DEBUG Local after(ms): \(resp.localAfterMs)")
+        stderrLog("DEBUG Estimated roundtrip(ms): \(roundtripMs)")
+        stderrLog("DEBUG Estimated offset remote - local(ms): \(offsetMs)")
+        if config.useSyslog {
+            syslogWrite(LOG_INFO, "NTP server=\(config.server) addr=\(resp.serverAddr) offset_ms=\(offsetMs) rtt_ms=\(roundtripMs)")
+        }
+    }
+
+    // Roundtrip sanity check
+    guard roundtripMs >= 0 && roundtripMs <= 10000 else {
+        stderrLog("ERROR Invalid roundtrip time: \(roundtripMs) ms")
+        if config.useSyslog {
+            syslogWrite(LOG_ERR, "Invalid suspiciously long roundtrip time: \(roundtripMs) ms")
+        }
+        return 1
+    }
+
+    // Delta < 500ms: skip adjustment
+    if abs(offsetMs) > 0 && abs(offsetMs) < 500 {
+        if config.verbose {
+            stderrLog("INFO Delta < 500ms, not setting system time.")
+            if config.useSyslog { syslogWrite(LOG_INFO, "Delta < 500ms, not setting system time") }
+        }
+        return 0
+    }
+
+    // Year range check
+    guard remoteYear >= 2025 && remoteYear <= 2200 else {
+        stderrLog("ERROR Remote year is out of valid range (2025-2200): \(remoteYear)")
+        if config.useSyslog {
+            syslogWrite(LOG_ERR, "Remote year is out of valid range (2025-2200): \(remoteYear)")
+        }
+        return 1
+    }
+
+    if config.testOnly { return 0 }
+
+    // Root check
+    guard getuid() == 0 else {
+        stderrLog("WARNING Not root, not setting system time.")
+        if config.useSyslog { syslogWrite(LOG_WARNING, "Not root, not setting system time") }
+        return 0
+    }
+
+    // Overflow guard on remote_ms + half_rtt — matches C's INT64_MAX check
+    let halfRtt = roundtripMs / 2
+    guard resp.remoteMs <= Int64.max - halfRtt else {
+        stderrLog("ERROR Time calculation would overflow, not adjusting system time.")
+        if config.useSyslog { syslogWrite(LOG_ERR, "Time calculation would overflow") }
+        return 1
+    }
+    let newTimeMs = resp.remoteMs + halfRtt
+
+    let api = "settimeofday"
+    if setSystemTime(newTimeMs) {
+        stderrLog("INFO System time set using \(api) (\(remoteTimeStr))")
+        if config.useSyslog { syslogWrite(LOG_INFO, "System time set using \(api) (\(remoteTimeStr))") }
+        return 0
+    } else {
+        stderrLog("ERROR Failed to adjust system time with \(api): \(String(cString: strerror(errno)))")
+        if config.useSyslog {
+            syslogWrite(LOG_ERR, "Failed to adjust system time with \(api): \(String(cString: strerror(errno)))")
+        }
+        return 10
+    }
+}
+
+// MARK: - Entry point
+
 let config = parseArgs()
-let exitCode = doNtpQuery(config: config)
-exit(exitCode)
+exit(run(config))
