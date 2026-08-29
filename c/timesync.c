@@ -406,17 +406,8 @@ int main(int argc, char **argv) {
     int64_t avg_local_ms = (local_before_ms + local_after_ms) / 2;
     int64_t offset_ms = remote_ms - avg_local_ms;
     int64_t roundtrip_ms = local_after_ms - local_before_ms;
-    time_t now = local_before_ms / 1000;
-    struct tm local_tm;
-    char local_time_str[64] = "";
-    if (localtime_r(&now, &local_tm) != NULL) {
-        if (strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%dT%H:%M:%S%z",
-                     &local_tm) == 0) {
-            snprintf(local_time_str, sizeof(local_time_str), "TIME_FORMAT_ERROR");
-        }
-    }
 
-    /* Print output */
+    /* Parse remote time unconditionally — needed for year check and success log */
     time_t remote_sec = (time_t)(remote_ms / 1000);
     struct tm remote_tm;
     char remote_time_str[64] = "";
@@ -434,6 +425,16 @@ int main(int argc, char **argv) {
     }
 
     if (config.verbose) {
+        /* Parse local time only when needed — avoid unnecessary localtime_r call */
+        time_t now = local_before_ms / 1000;
+        struct tm local_tm;
+        char local_time_str[64] = "";
+        if (localtime_r(&now, &local_tm) != NULL) {
+            if (strftime(local_time_str, sizeof(local_time_str), "%Y-%m-%dT%H:%M:%S%z",
+                         &local_tm) == 0) {
+                snprintf(local_time_str, sizeof(local_time_str), "TIME_FORMAT_ERROR");
+            }
+        }
         stderr_log("DEBUG Server: %s (%s)", config.server, server_addr);
         stderr_log("DEBUG Local time: %s.%03lld", local_time_str,
                    (long long)(local_after_ms % 1000));
